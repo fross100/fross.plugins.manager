@@ -56,6 +56,17 @@ Panel {
   property bool installRunning: false
   property bool installFailed: false
   property string installResult: ""
+  // Confirm popup shown before running install: ask whether to enable the
+  // freshly installed plugin. installPendingUrl carries the extracted URL.
+  property bool installConfirmOpen: false
+  property string installPendingUrl: ""
+  property bool installPendingEnable: false
+  // After a successful install, enable the plugin through the registry with a
+  // retry loop. The CLI's own `--enable` waits only ~2s for discovery, which
+  // races with the shell reload, so the panel drives enable itself.
+  property bool installShouldEnable: false
+  property string installPendingId: ""
+  property int installEnableAttempts: 0
 
   // Plugin removal page state. Only third-party plugins are listed; each row
   // gets a trash button for a single remove, and a multi-select mode (check
@@ -74,6 +85,9 @@ Panel {
       root.installFailed = false
       root.installResult = ""
       Qt.callLater(function() { installUrlField.forceActiveFocus() })
+    } else {
+      root.installConfirmOpen = false
+      root.installPendingUrl = ""
     }
   }
 
@@ -543,9 +557,48 @@ Panel {
     stderr: StdioCollector { id: removeStderr; waitForEnd: true }
   }
 
-  function installPlugin() {
-    var url = String(installUrlField.text || "").trim()
+  // Accepts either a bare git URL or a full `omarchy plugin add <url>`
+  // command. Returns the URL token, or "" if none can be found.
+  function extractInstallUrl(text) {
+    var t = String(text || "").trim()
+    if (t === "") return ""
+    // Bare URL (possibly with .git): return it as-is.
+    if (t.indexOf("://") !== -1 && t.indexOf(" ") === -1) return t
+    if (t.indexOf("git@") === 0 && t.indexOf(" ") === -1) return t
+    // Full command: pick the first token that looks like a URL.
+    var tokens = t.split(/\s+/)
+    for (var i = 0; i < tokens.length; i++) {
+      var tok = tokens[i]
+      if (tok.indexOf("://") !== -1 || tok.indexOf("git@") === 0)
+        return tok
+    }
+    return ""
+  }
+
+  // `--enable` in a pasted command is honored: the plugin is enabled after
+  // install, matching `omarchy plugin add <url> --enable`.
+  function installCommandHasEnable(text) {
+    return /\s--enable\b/.test(" " + String(text || "").trim())
+  }
+
+  // Called from the install dialog: extract the URL, then ask whether to
+  // enable the plugin after install. A `--enable` in a pasted command
+  // pre-chooses the enable option.
+  function requestInstall() {
+    var url = root.extractInstallUrl(installUrlField.text)
     if (url === "") return
+    root.installPendingUrl = url
+    root.installPendingEnable = root.installCommandHasEnable(installUrlField.text)
+    root.installConfirmOpen = true
+  }
+
+  function installPlugin() {
+    var url = root.installPendingUrl
+    if (url === "") return
+    root.installShouldEnable = root.installPendingEnable
+    root.installPendingId = ""
+    root.installEnableAttempts = 0
+    root.installConfirmOpen = false
     root.installRunning = true
     root.installFailed = false
     root.installResult = "Installing " + url + "…"
@@ -553,15 +606,61 @@ Panel {
     installProcess.running = true
   }
 
+  function cancelInstallConfirm() {
+    root.installPendingUrl = ""
+    root.installConfirmOpen = false
+  }
+
   function onInstallFinished(exitCode) {
     var err = String(installStderr.text || "").trim()
     root.installRunning = false
     if (exitCode === 0) {
-      root.installResult = "Installed. Review the code, then enable it in the list."
-      Qt.callLater(function() { root.refreshPlugins() })
+      if (root.installShouldEnable) {
+        root.installResult = "Installed. Enabling…"
+        var id = root.installIdFromStdout(String(installStdout.text || ""))
+        root.installPendingId = id
+        root.installEnableAttempts = 0
+        installEnableTimer.restart()
+      } else {
+        root.installResult = "Installed. Review the code, then enable it in the list."
+        Qt.callLater(function() { root.refreshPlugins() })
+      }
     } else {
       root.installFailed = true
       root.installResult = "Install failed" + (err ? ": " + err : "")
+    }
+  }
+
+  // The install script prints "Added <id> into <path>". Fall back to the
+  // registry if stdout is not available yet.
+  function installIdFromStdout(text) {
+    var m = /Added\s+([^\s]+)\s+into\s+/.exec(text)
+    return m ? m[1] : ""
+  }
+
+  // Wait for the plugin to appear in the registry, then enable it. The CLI's
+  // discovery window is too short inside the panel, so retry a few seconds.
+  property Timer installEnableTimer: Timer {
+    interval: 250
+    repeat: false
+    onTriggered: {
+      var reg = root.bar ? root.bar.pluginRegistry : null
+      if (root.installEnableAttempts++ >= 40) {
+        root.installFailed = true
+        root.installResult = "Installed, but enabling timed out"
+        root.refreshPlugins()
+        return
+      }
+      var id = root.installPendingId
+      if (id === "") id = root.installIdFromStdout(String(installStdout.text || ""))
+      if (id !== "" && reg && reg.installedPlugins && reg.installedPlugins[id]) {
+        reg.setEnabled(id, true)
+        root.installPendingId = ""
+        root.installResult = "Installed and enabled."
+        root.refreshPlugins()
+      } else {
+        installEnableTimer.restart()
+      }
     }
   }
 
@@ -774,11 +873,11 @@ Panel {
           spacing: Style.space(8)
 
           Label {
-            text: root.visibleRows.length + " found — " +
-              (root.visibleRows.filter(function(p) { return p.enabled }).length) + " enabled"
-            color: Qt.darker(root.contentForeground, 1.5)
+            text: "Installed Plugins"
+            color: root.contentForeground
             font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.body
+            font.bold: true
             Layout.fillWidth: true
           }
 
@@ -1705,14 +1804,14 @@ Panel {
 
           TextField {
             id: installUrlField
-            placeholderText: "https://github.com/acme/omarchy-weather.git"
+            placeholderText: "https://github.com/acme/omarchy-weather.git or omarchy plugin add <url> --enable"
             foreground: root.contentForeground
             accent: Color.accent
             font.family: root.contentFontFamily
             Layout.fillWidth: true
             onAccepted: {
               if (installUrlField.text.trim() !== "" && !root.installRunning)
-                root.installPlugin()
+                root.requestInstall()
             }
           }
 
@@ -1754,7 +1853,109 @@ Panel {
               fontSize: Style.font.bodySmall
               horizontalPadding: Style.space(12)
               verticalPadding: Style.space(6)
-              onClicked: root.installPlugin()
+              onClicked: root.requestInstall()
+            }
+          }
+        }
+      }
+    }
+
+    // Confirmation before installing: ask whether to enable the freshly
+    // installed plugin. Shown above the install dialog so the entered URL
+    // stays visible while deciding.
+    Rectangle {
+      id: installConfirmDialog
+      visible: root.installConfirmOpen
+      anchors.fill: parent
+      z: 11000
+      color: Util.alpha(root.panelBackground, 0.7)
+      focus: true
+      Keys.priority: Keys.BeforeItem
+      Keys.onEscapePressed: root.cancelInstallConfirm()
+
+      MouseArea {
+        anchors.fill: parent
+        onClicked: root.cancelInstallConfirm()
+      }
+
+      Rectangle {
+        id: installConfirmCard
+        anchors.centerIn: parent
+        width: Math.min(parent.width - Style.space(32), Style.space(380))
+        height: installConfirmColumn.implicitHeight + Style.space(36)
+        color: root.panelBackground
+        radius: Style.cornerRadius
+        border.color: Style.selectedStateColor(root.contentForeground, Color.accent)
+        border.width: 1
+
+        ColumnLayout {
+          id: installConfirmColumn
+          anchors.fill: parent
+          anchors.margins: Style.space(18)
+          spacing: Style.space(12)
+
+          Text {
+            text: "Install plugin?"
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.title
+            font.bold: true
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            text: "\"" + root.installPendingUrl + "\" will be added via `omarchy plugin add`. Do you want to enable it right after installing?"
+            color: Qt.darker(root.contentForeground, 1.6)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+          }
+
+          RowLayout {
+            Layout.fillWidth: true
+
+            Item { Layout.fillWidth: true }
+
+            Button {
+              text: "Cancel"
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(12)
+              verticalPadding: Style.space(6)
+              onClicked: root.cancelInstallConfirm()
+            }
+
+            Button {
+              text: "Install"
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(12)
+              verticalPadding: Style.space(6)
+              onClicked: {
+                root.installPendingEnable = false
+                root.installPlugin()
+              }
+            }
+
+            Button {
+              text: "Install & Enable"
+              bordered: true
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(12)
+              verticalPadding: Style.space(6)
+              onClicked: {
+                root.installPendingEnable = true
+                root.installPlugin()
+              }
             }
           }
         }
