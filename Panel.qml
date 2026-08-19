@@ -221,6 +221,21 @@ Panel {
     n
   }
 
+  readonly property int enabledPluginCount: {
+    var n = 0
+    for (var i = 0; i < root.pluginRows.length; i++) if (root.pluginRows[i].enabled) n++
+    n
+  }
+
+  readonly property string headerSummary: {
+    var parts = []
+    parts.push(root.pluginRows.length + " plugins")
+    parts.push(root.enabledPluginCount + " enabled")
+    if (root.pendingUpdateCount > 0)
+      parts.push(root.pendingUpdateCount + " update" + (root.pendingUpdateCount > 1 ? "s" : "") + " available")
+    parts.join(" · ")
+  }
+
   // Plugins that may be removed: only third-party (not omarchy first-party).
   readonly property var removableRows: root.pluginRows.filter(function(p) { return !p.firstParty })
 
@@ -661,14 +676,79 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(560))
-    contentHeight: panel.fittedContentHeight(Math.round(Style.space(460)))
+    contentHeight: panel.fittedContentHeight(Math.round(Style.space(560)))
 
     // ------------------------------------------------------------------- content
+
+    // Persistent app header: sits above every page (main, updates, remove).
+    Rectangle {
+      id: appHeader
+      anchors.top: parent.top
+      anchors.left: parent.left
+      anchors.right: parent.right
+      height: appHeaderColumn.implicitHeight + Style.space(16)
+      z: 6000
+      color: root.panelBackground
+
+      ColumnLayout {
+        id: appHeaderColumn
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.topMargin: Style.space(8)
+        anchors.leftMargin: Style.space(16)
+        anchors.rightMargin: Style.space(16)
+        anchors.bottomMargin: Style.space(8)
+        spacing: Style.space(2)
+
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Style.space(14)
+
+          Text {
+            id: appHeaderIcon
+            Layout.preferredWidth: Style.space(44)
+            Layout.preferredHeight: Style.space(44)
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            text: root.iconFor("fross.plugins.manager") || "\udb85\udcd9"
+            color: Style.selectedStateColor(root.contentForeground, Color.accent)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.space(34)
+            font.bold: true
+          }
+
+          ColumnLayout {
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignVCenter
+            spacing: Style.space(2)
+
+            Label {
+              text: "OMAPLUG"
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.title * 1.6
+              font.bold: true
+              Layout.fillWidth: true
+            }
+
+            Label {
+              text: root.headerSummary
+              color: Qt.darker(root.contentForeground, 1.5)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              Layout.fillWidth: true
+            }
+          }
+        }
+      }
+    }
 
     Item {
       id: panelContent
       anchors.fill: parent
       clip: true
+      anchors.topMargin: appHeader.height
 
       MouseArea {
         anchors.fill: parent
@@ -688,15 +768,6 @@ Panel {
         anchors.fill: parent
         anchors.margins: Style.space(16)
         spacing: Style.space(10)
-
-        Label {
-          text: "Installed Plugins"
-          color: root.contentForeground
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.body
-          font.bold: true
-          Layout.fillWidth: true
-        }
 
         RowLayout {
           Layout.fillWidth: true
@@ -1011,6 +1082,7 @@ Panel {
       ColumnLayout {
         anchors.fill: parent
         anchors.margins: Style.space(16)
+        anchors.topMargin: appHeader.height + Style.space(16)
         spacing: Style.space(10)
 
         RowLayout {
@@ -1286,6 +1358,7 @@ Panel {
       ColumnLayout {
         anchors.fill: parent
         anchors.margins: Style.space(16)
+        anchors.topMargin: appHeader.height + Style.space(16)
         spacing: Style.space(10)
 
         RowLayout {
