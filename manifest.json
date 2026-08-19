@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "fross.plugins.manager",
+  "name": "Plugin Manager",
+  "version": "1.0.0",
+  "author": "Fross",
+  "description": "Manage installed Omarchy plugins: enable/disable, update, install from git, and remove third-party plugins",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Plugin Manager",
+    "description": "Enable/disable, update, install, and remove plugins",
+    "category": "System",
+    "allowMultiple": false
+  }
+}
