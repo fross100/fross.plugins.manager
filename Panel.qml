@@ -86,6 +86,15 @@ Panel {
   property bool removingPlugin: false
   property bool removeConfirmOpen: false
   property var removePending: []
+  property string removeSearchText: ""
+  // Right-click context menu on a main-page row.
+  property bool rowMenuOpen: false
+  property string rowMenuId: ""
+  property var rowMenuPos: ({ x: 0, y: 0 })
+  onRowMenuOpenChanged: {
+    if (root.rowMenuOpen) rowMenu.open()
+    else rowMenu.close()
+  }
   onInstallDialogOpenChanged: {
     if (root.installDialogOpen) {
       root.installRunning = false
@@ -260,6 +269,16 @@ Panel {
   // Plugins that may be removed: only third-party (not omarchy first-party).
   readonly property var removableRows: root.pluginRows.filter(function(p) { return !p.firstParty })
 
+  // Remove-page rows honoring the remove search field.
+  readonly property var removeVisibleRows: root.removableRows.filter(function(p) {
+    var q = root.removeSearchText.trim().toLowerCase()
+    if (q === "") return true
+    return String(p.name || "").toLowerCase().indexOf(q) !== -1
+      || String(p.description || "").toLowerCase().indexOf(q) !== -1
+      || String(p.id || "").toLowerCase().indexOf(q) !== -1
+      || String(p.author || "").toLowerCase().indexOf(q) !== -1
+  })
+
   readonly property int selectedRemoveCount: {
     var n = 0
     for (var k in root.removeSelection) if (root.removeSelection[k]) n++
@@ -352,6 +371,23 @@ Panel {
   function openPluginRepo(sourceKey) {
     var url = root.repoUrlFor(sourceKey)
     if (url) Qt.openUrlExternally(url)
+  }
+
+  function openRowMenu(id, x, y) {
+    root.rowMenuId = id
+    root.rowMenuPos = { x: x, y: y }
+    root.rowMenuOpen = true
+  }
+
+  function closeRowMenu() {
+    root.rowMenuOpen = false
+    root.rowMenuId = ""
+  }
+
+  function rowMenuPlugin() {
+    for (var i = 0; i < root.pluginRows.length; i++)
+      if (root.pluginRows[i].id === root.rowMenuId) return root.pluginRows[i]
+    return null
   }
 
   // Fetches every git-managed plugin's remote and reports which are behind.
@@ -1179,6 +1215,16 @@ Panel {
               id: hover
             }
 
+            // Right-click opens a context menu with enable/disable, source, remove.
+            TapHandler {
+              id: rowContextTap
+              acceptedButtons: Qt.RightButton
+              onTapped: function(event) {
+                var pt = rowContextTap.mapToItem(root.contentItem ? root.contentItem : root, event.point.position.x, event.point.position.y)
+                root.openRowMenu(modelData.id, pt.x, pt.y)
+              }
+            }
+
             Rectangle {
               anchors.left: parent.left
               anchors.right: parent.right
@@ -1503,7 +1549,18 @@ Panel {
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.body
             font.bold: true
+          }
+
+          TextField {
+            id: removeSearchField
             Layout.fillWidth: true
+            placeholderText: "Search plugins to remove…"
+            foreground: root.contentForeground
+            accent: Color.accent
+            font.family: root.contentFontFamily
+            text: root.removeSearchText
+            onTextChanged: root.removeSearchText = text
+            Keys.onEscapePressed: { root.removePageOpen = false }
           }
 
           Button {
@@ -1540,7 +1597,7 @@ Panel {
           Layout.fillHeight: true
           clip: true
           spacing: Style.space(4)
-          model: root.removableRows
+          model: root.removeVisibleRows
           ScrollBar.vertical: ScrollBar {
             policy: ScrollBar.AsNeeded
             implicitWidth: Style.space(6)
@@ -1684,6 +1741,101 @@ Panel {
             horizontalPadding: Style.space(12)
             verticalPadding: Style.space(6)
             onClicked: root.removeSelected()
+          }
+        }
+      }
+    }
+
+    // ── Row context menu ─────────────────────────────────────────────────────
+    // Right-click on a plugin row on the main page opens a small menu with the
+    // same actions the row buttons offer: enable/disable, open the source repo
+    // (when known), and remove.
+    Popup {
+      id: rowMenu
+      parent: root.contentItem ? root.contentItem : root
+      x: root.rowMenuPos.x
+      y: root.rowMenuPos.y
+      padding: Style.space(4)
+      focus: true
+      z: 12000
+      closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+
+      onVisibleChanged: {
+        if (!visible) root.rowMenuOpen = false
+      }
+
+      background: Rectangle {
+        color: root.panelBackground
+        radius: Style.cornerRadius
+        border.color: Util.alpha(root.contentForeground, 0.2)
+        border.width: 1
+      }
+
+      contentItem: ColumnLayout {
+        spacing: Style.space(2)
+        implicitWidth: Style.space(180)
+
+        property var plugin: root.rowMenuPlugin()
+
+        Label {
+          text: plugin ? plugin.name : ""
+          color: root.contentForeground
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.bodySmall
+          font.bold: true
+          Layout.fillWidth: true
+          elide: Label.ElideRight
+          Layout.margins: Style.space(6)
+        }
+
+        Button {
+          text: plugin && plugin.enabled ? "Disable" : "Enable"
+          foreground: root.contentForeground
+          accent: Color.accent
+          fontFamily: root.contentFontFamily
+          fontSize: Style.font.bodySmall
+          horizontalPadding: Style.space(8)
+          verticalPadding: Style.space(5)
+          Layout.fillWidth: true
+          Layout.alignment: Qt.AlignLeft
+          onClicked: {
+            root.setPluginEnabled(root.rowMenuId, !plugin.enabled)
+            root.closeRowMenu()
+          }
+        }
+
+        Button {
+          visible: plugin && plugin.sourceKey !== "" && root.pluginRepos[plugin.sourceKey] !== undefined
+          text: "Source"
+          foreground: root.contentForeground
+          accent: Color.accent
+          fontFamily: root.contentFontFamily
+          fontSize: Style.font.bodySmall
+          horizontalPadding: Style.space(8)
+          verticalPadding: Style.space(5)
+          Layout.fillWidth: true
+          Layout.alignment: Qt.AlignLeft
+          onClicked: {
+            root.openPluginRepo(plugin.sourceKey)
+            root.closeRowMenu()
+          }
+        }
+
+        Button {
+          visible: plugin && !plugin.firstParty
+          text: "Remove"
+          foreground: Color.urgent
+          accent: Color.urgent
+          fontFamily: root.contentFontFamily
+          fontSize: Style.font.bodySmall
+          horizontalPadding: Style.space(8)
+          verticalPadding: Style.space(5)
+          Layout.fillWidth: true
+          Layout.alignment: Qt.AlignLeft
+          onClicked: {
+            var id = root.rowMenuId
+            root.closeRowMenu()
+            root.removePlugin(id)
           }
         }
       }
