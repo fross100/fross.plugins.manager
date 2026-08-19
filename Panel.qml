@@ -61,12 +61,19 @@ Panel {
   property bool installConfirmOpen: false
   property string installPendingUrl: ""
   property bool installPendingEnable: false
-  // After a successful install, enable the plugin through the registry with a
-  // retry loop. The CLI's own `--enable` waits only ~2s for discovery, which
-  // races with the shell reload, so the panel drives enable itself.
+  // After a successful install, enable the plugin by running the CLI enable
+  // command once the shell has had time to discover the new plugin. The CLI's
+  // own `--enable` during add races with the reload, so enable runs as a
+  // separate step afterwards.
   property bool installShouldEnable: false
   property string installPendingId: ""
   property int installEnableAttempts: 0
+  // Paths for the detached install helper. The helper is launched with
+  // setsid/nohup because `omarchy plugin add` reloads plugins at the end,
+  // which unloads this panel and would kill an ordinary Process mid-run.
+  property string installHelperPath: ""
+  property string installStatusPath: ""
+  property bool installDetachedRunning: false
 
   // Plugin removal page state. Only third-party plugins are listed; each row
   // gets a trash button for a single remove, and a multi-select mode (check
@@ -539,13 +546,12 @@ Panel {
     }
   }
 
-  property Process installProcess: Process {
+  // Launches the detached install helper. It only needs to start the
+  // setsid/nohup command and exit, so no output collection is required.
+  property Process installLaunchProcess: Process {
     onExited: function(exitCode) {
-      console.log("installProcess onExited exitCode=", exitCode)
-      root.onInstallFinished(exitCode)
+      console.log("installLaunchProcess onExited exitCode=", exitCode)
     }
-    stdout: StdioCollector { id: installStdout; waitForEnd: true }
-    stderr: StdioCollector { id: installStderr; waitForEnd: true }
   }
 
   property Process removeProcess: Process {
@@ -602,8 +608,30 @@ Panel {
     root.installRunning = true
     root.installFailed = false
     root.installResult = "Installing " + url + "…"
-    installProcess.command = ["bash", "-c", "omarchy plugin add \"$0\" --yes", url]
-    installProcess.running = true
+    root.startDetachedInstall(url)
+  }
+
+  // Launch the detached helper. `omarchy plugin add` reloads plugins when it
+  // finishes, which unloads this panel; the helper is started with
+  // setsid/nohup so it survives and finishes the enable itself.
+  function startDetachedInstall(url) {
+    var helper = root.installHelperPath
+    if (helper === "") {
+      root.installFailed = true
+      root.installResult = "Install helper not found"
+      return
+    }
+    root.installStatusPath = "/tmp/fross-install-" + Date.now() + ".status"
+    root.installDetachedRunning = true
+    root.installResult = "Installing " + url + "…"
+    var enableFlag = root.installShouldEnable ? "1" : "0"
+    var launch = ["bash", "-c",
+      "setsid nohup \"$0\" \"$1\" \"$2\" \"$3\" >/dev/null 2>&1 &",
+      helper, url, root.installStatusPath, enableFlag]
+    // Use a short-lived Process to fire the helper; it exits immediately.
+    installLaunchProcess.command = launch
+    installLaunchProcess.running = true
+    installStatusFile.path = root.installStatusPath
   }
 
   function cancelInstallConfirm() {
@@ -611,56 +639,60 @@ Panel {
     root.installConfirmOpen = false
   }
 
-  function onInstallFinished(exitCode) {
-    var err = String(installStderr.text || "").trim()
-    root.installRunning = false
-    if (exitCode === 0) {
-      if (root.installShouldEnable) {
-        root.installResult = "Installed. Enabling…"
-        var id = root.installIdFromStdout(String(installStdout.text || ""))
-        root.installPendingId = id
-        root.installEnableAttempts = 0
-        installEnableTimer.restart()
+  // Poll the detached helper's status file. The helper survives the plugin
+  // reload that `omarchy plugin add` triggers (which unloads this panel), so
+  // we watch its progress here and refresh when it finishes.
+  FileView {
+    id: installStatusFile
+    path: root.installStatusPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.onInstallStatusUpdate()
+    onFileChanged: root.onInstallStatusUpdate()
+  }
+
+  function onInstallStatusUpdate() {
+    if (!root.installDetachedRunning) return
+    if (root.installStatusPath === "") return
+    var text = ""
+    try { text = installStatusFile.text() } catch (e) { return }
+    if (text === "") return
+    var lines = String(text).split("\n")
+    var id = ""
+    var done = false
+    var failed = false
+    var enabled = false
+    var installing = false
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i].trim()
+      if (line.indexOf("id=") === 0) id = line.substring(3)
+      else if (line === "installing") installing = true
+      else if (line === "done") done = true
+      else if (line === "install_failed" || line === "enable_failed") failed = true
+      else if (line === "enabled") enabled = true
+      else if (line === "install_ok_no_id") { done = true; failed = true }
+    }
+    if (installing && !done) {
+      root.installRunning = true
+      root.installResult = "Installing…"
+      return
+    }
+    if (done) {
+      root.installDetachedRunning = false
+      root.installRunning = false
+      root.installStatusPath = ""
+      if (failed) {
+        root.installFailed = true
+        root.installResult = "Install failed"
+      } else if (root.installShouldEnable && !enabled) {
+        root.installFailed = true
+        root.installResult = "Installed, but enabling failed"
+      } else if (root.installShouldEnable) {
+        root.installResult = "Installed and enabled."
       } else {
         root.installResult = "Installed. Review the code, then enable it in the list."
-        Qt.callLater(function() { root.refreshPlugins() })
       }
-    } else {
-      root.installFailed = true
-      root.installResult = "Install failed" + (err ? ": " + err : "")
-    }
-  }
-
-  // The install script prints "Added <id> into <path>". Fall back to the
-  // registry if stdout is not available yet.
-  function installIdFromStdout(text) {
-    var m = /Added\s+([^\s]+)\s+into\s+/.exec(text)
-    return m ? m[1] : ""
-  }
-
-  // Wait for the plugin to appear in the registry, then enable it. The CLI's
-  // discovery window is too short inside the panel, so retry a few seconds.
-  property Timer installEnableTimer: Timer {
-    interval: 250
-    repeat: false
-    onTriggered: {
-      var reg = root.bar ? root.bar.pluginRegistry : null
-      if (root.installEnableAttempts++ >= 40) {
-        root.installFailed = true
-        root.installResult = "Installed, but enabling timed out"
-        root.refreshPlugins()
-        return
-      }
-      var id = root.installPendingId
-      if (id === "") id = root.installIdFromStdout(String(installStdout.text || ""))
-      if (id !== "" && reg && reg.installedPlugins && reg.installedPlugins[id]) {
-        reg.setEnabled(id, true)
-        root.installPendingId = ""
-        root.installResult = "Installed and enabled."
-        root.refreshPlugins()
-      } else {
-        installEnableTimer.restart()
-      }
+      root.refreshPlugins()
     }
   }
 
@@ -718,6 +750,7 @@ Panel {
 
   Component.onCompleted: {
     console.log("Panel.qml loaded, filterMode=", root.filterMode, "rows=", root.pluginRows.length)
+    root.installHelperPath = String(Qt.resolvedUrl("install-helper.sh")).replace(/^file:\/\//, "")
     refreshPlugins()
   }
 
