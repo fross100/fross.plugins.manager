@@ -53,6 +53,20 @@ Panel {
   property bool updatingAll: false
   property string updateSummary: ""
   property string updatingId: ""
+  property string updateHelperPath: ""
+  property string updateRunnerPath: ""
+  readonly property string updateStateRoot: {
+    var runtime = Quickshell.env("XDG_RUNTIME_DIR")
+    return runtime && runtime !== ""
+      ? runtime + "/omaplug"
+      : Quickshell.env("HOME") + "/.cache/omaplug"
+  }
+  readonly property string updateStatusPath: root.updateStateRoot + "/update.status"
+  property bool updateDetachedRunning: false
+  property bool updateAwaitingStart: false
+  property string updateExpectedJobId: ""
+  property string updateProbePid: ""
+  property int updateDeadProbeCount: 0
   // Full-page "check for updates" view (replaces the header inline progress).
   property bool updatesPageOpen: false
   // Streaming parse state for per-plugin progress.
@@ -108,19 +122,6 @@ Panel {
     } else {
       root.installConfirmOpen = false
       root.installPendingUrl = ""
-    }
-  }
-
-  property Timer checkWatchdog: Timer {
-    interval: 45000
-    repeat: false
-    onTriggered: {
-      console.log("checkWatchdog timeout, process running=", updateCheckProcess.running)
-      if (!root.checkingUpdates) return
-      if (updateCheckProcess.running)
-        updateCheckProcess.signal(9)
-      root.checkingUpdates = false
-      root.updateSummary = "Check timed out — a repository may be unreachable"
     }
   }
 
@@ -230,7 +231,7 @@ Panel {
       || String(p.kinds || "").toLowerCase().indexOf(q) !== -1
   })
 
-  // Plugins that are git-managed (updatable) — what the check actually scans.
+  // Third-party plugin folders that the update check classifies.
   readonly property var updateCheckRows: root.pluginRows.filter(function(p) { return p.updatable })
 
   function updateStatusText(key) {
@@ -239,6 +240,8 @@ Panel {
     if (st === "CHECK") return "Checking…"
     if (st === "CURRENT") return "Up to date"
     if (st === "UPDATE") return "Update available"
+    if (st === "LOCAL_CHANGES") return "Local changes"
+    if (st === "LOCAL") return "Local plugin"
     if (st === "ERROR") return "Error"
     return st
   }
@@ -248,7 +251,12 @@ Panel {
     if (st === "UPDATE") return Style.selectedStateColor(root.contentForeground, Color.accent)
     if (st === "ERROR") return Color.urgent
     if (st === "CURRENT") return Qt.darker(root.contentForeground, 1.6)
+    if (st === "LOCAL_CHANGES" || st === "LOCAL") return Qt.darker(root.contentForeground, 1.5)
     return Qt.darker(root.contentForeground, 1.4)
+  }
+
+  function updateErrorSuffix(count) {
+    return count > 0 ? " (" + count + " error" + (count === 1 ? "" : "s") + ")" : ""
   }
 
   readonly property int pendingUpdateCount: {
@@ -404,36 +412,21 @@ Panel {
     return null
   }
 
-  // Fetches every git-managed plugin's remote and reports which are behind.
-  // The script echoes a CHECK line before each plugin so the updates page can
-  // show per-plugin progress while the fetch runs, then the result line.
+  // Classify every installed third-party plugin. The helper distinguishes a
+  // clean checkout that is actually behind from developer symlinks, dirty or
+  // locally-ahead repositories, missing remotes, and genuine fetch failures.
   function checkUpdates() {
     console.log("checkUpdates start, checkingUpdates=", root.checkingUpdates, "updatingId=", root.updatingId)
     var reg = root.registry
     var dir = reg && reg.pluginsDir ? reg.pluginsDir : ""
     console.log("pluginsDir=", dir)
-    if (!dir || root.checkingUpdates || root.updatingId !== "") return
+    if (!dir || root.updateHelperPath === "" || root.checkingUpdates || root.updateDetachedRunning) return
     root.checkingUpdates = true
     root.updateSummary = ""
+    root.updateStates = ({})
     root.updateCheckLineBuf = ""
     root.updateCheckProcessed = 0
-    root.checkWatchdog.restart()
-    var script = ""
-      + "dirs=\"$0\"\n"
-      + "for d in \"$dirs\"/*/; do\n"
-      + "  [ -d \"$d/.git\" ] || continue\n"
-      + "  id=$(basename \"$d\")\n"
-      + "  echo \"CHECK|$id\"\n"
-      + "  if ! timeout 15 git -C \"$d\" fetch --quiet origin HEAD 2>/dev/null; then\n"
-      + "    echo \"ERROR|$id\"; continue\n"
-      + "  fi\n"
-      + "  if [ \"$(git -C \"$d\" rev-parse HEAD)\" = \"$(git -C \"$d\" rev-parse FETCH_HEAD)\" ]; then\n"
-      + "    echo \"CURRENT|$id\"\n"
-      + "  else\n"
-      + "    echo \"UPDATE|$id\"\n"
-      + "  fi\n"
-      + "done"
-    updateCheckProcess.command = ["bash", "-c", script, dir]
+    updateCheckProcess.command = [root.updateHelperPath, dir]
     console.log("checkUpdates command set, running...")
     updateCheckProcess.running = true
     console.log("checkUpdates running=", updateCheckProcess.running, "pid=", updateCheckProcess.processId)
@@ -442,8 +435,29 @@ Panel {
   // Incremental per-line parse of the streaming check output. The collector's
   // text is cumulative, so diff from the last-processed offset and buffer the
   // tail until a newline lands. Each plugin is reported as CHECK, then
-  // CURRENT/UPDATE/ERROR; updateStates updates live so the updates page's rows
-  // flip as the fetch for each plugin completes.
+  // CURRENT/UPDATE/LOCAL_CHANGES/LOCAL/ERROR; updateStates updates live so the
+  // updates page's rows flip as the fetch for each plugin completes.
+  function applyUpdateCheckLine(line) {
+    var cleanLine = String(line || "").trim()
+    if (cleanLine === "") return
+    var parts = cleanLine.split("\t")
+    if (parts.length < 2) return
+    var state = parts[0]
+    var key = parts[1]
+    if (["CHECK", "CURRENT", "UPDATE", "LOCAL_CHANGES", "LOCAL", "ERROR"].indexOf(state) < 0 || key === "") return
+    var st = {}
+    for (var k in root.updateStates) st[k] = root.updateStates[k]
+    st[key] = state
+    root.updateStates = st
+
+    if (parts.length > 2 && parts[2] !== "") {
+      var repos = {}
+      for (var r in root.pluginRepos) repos[r] = root.pluginRepos[r]
+      repos[key] = parts[2]
+      root.pluginRepos = repos
+    }
+  }
+
   function applyUpdateCheckData(text) {
     var all = String(text || "")
     var fresh = all.substring(root.updateCheckProcessed)
@@ -454,88 +468,199 @@ Panel {
     var ready = root.updateCheckLineBuf.substring(0, idx + 1)
     root.updateCheckLineBuf = root.updateCheckLineBuf.substring(idx + 1)
     var lines = ready.split("\n")
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i].trim()
-      if (line === "") continue
-      var parts = line.split("|")
-      if (parts.length < 2) continue
-      var st = {}
-      for (var k in root.updateStates) st[k] = root.updateStates[k]
-      st[parts[1]] = parts[0]
-      root.updateStates = st
-    }
+    for (var i = 0; i < lines.length; i++) root.applyUpdateCheckLine(lines[i])
   }
 
   // Finalize after the stream ends: flush any unterminated tail, then compute
   // the summary from the collected per-plugin states.
-  function finishUpdateCheck() {
+  function finishUpdateCheck(exitCode) {
     if (root.updateCheckLineBuf !== "") {
       var tail = root.updateCheckLineBuf.trim()
       root.updateCheckLineBuf = ""
-      if (tail !== "") root.applyUpdateCheckData(tail + "\n")
+      if (tail !== "") root.applyUpdateCheckLine(tail)
     }
-    root.checkWatchdog.stop()
     root.checkingUpdates = false
+    var states = {}
+    for (var oldKey in root.updateStates) states[oldKey] = root.updateStates[oldKey]
+    for (var i = 0; i < root.updateCheckRows.length; i++) {
+      var sourceKey = root.updateCheckRows[i].sourceKey
+      if (!states[sourceKey] || states[sourceKey] === "CHECK") states[sourceKey] = "ERROR"
+    }
+    root.updateStates = states
     var updates = 0
     var errors = 0
     for (var key in root.updateStates) {
       if (root.updateStates[key] === "UPDATE") updates++
       else if (root.updateStates[key] === "ERROR") errors++
     }
-    if (updates === 0 && errors === 0)
+    if (exitCode !== 0)
+      root.updateSummary = "Update check failed" + root.updateErrorSuffix(errors)
+    else if (updates === 0 && errors === 0)
       root.updateSummary = ""
     else if (updates === 0)
-      root.updateSummary = "All plugins up to date" + (errors ? " (" + errors + " error)" : "")
+      root.updateSummary = "No updates available" + root.updateErrorSuffix(errors)
     else
       root.updateSummary = updates + " update" + (updates > 1 ? "s" : "") + " available"
-        + (errors ? " (" + errors + " error)" : "")
+        + root.updateErrorSuffix(errors)
   }
 
-  function updatePlugin(id) {
-    if (root.updatingId !== "") return
-    root.updatingId = id
-    root.updateSummary = "Updating " + id + "…"
-    updateProcess.command = ["bash", "-c", "omarchy plugin update \"$0\" --yes", id]
-    updateProcess.running = true
+  function updatePlugin(sourceKey) {
+    root.startDetachedUpdates([sourceKey])
   }
 
   function updateAll() {
-    if (root.updatingId !== "" || root.checkingUpdates || root.updatingAll) return
-    var pending = 0
-    for (var key in root.updateStates) {
-      if (root.updateStates[key] === "UPDATE") pending++
+    if (root.checkingUpdates || root.updateDetachedRunning) return
+    var ids = []
+    for (var i = 0; i < root.updateCheckRows.length; i++) {
+      var key = root.updateCheckRows[i].sourceKey
+      if (root.updateStates[key] === "UPDATE") ids.push(key)
     }
-    if (pending === 0) return
-    root.updatingAll = true
-    root.updateSummary = "Updating all " + pending + "…"
-    updateAllProcess.command = ["bash", "-c", "omarchy plugin update --yes"]
-    updateAllProcess.running = true
+    root.startDetachedUpdates(ids)
   }
 
-  function onUpdateAllFinished(exitCode) {
+  // Launch only the repositories proven updateable by the preceding check.
+  // The helper is detached because the first successful merge makes Omarchy
+  // unload this panel; progress lives at a stable runtime path so the newly
+  // loaded instance can reconnect to the same job.
+  function startDetachedUpdates(ids) {
+    if (!ids || ids.length === 0 || root.checkingUpdates || root.updateDetachedRunning) return
+    if (root.updateRunnerPath === "" || root.updateStatusPath === "") {
+      root.updateSummary = "Update helper not found"
+      return
+    }
+
+    root.updateDetachedRunning = true
+    root.updateAwaitingStart = true
+    root.updateExpectedJobId = Date.now().toString(36) + "-" + Math.floor(Math.random() * 0x1000000).toString(36)
+    root.updateProbePid = ""
+    root.updateDeadProbeCount = 0
+    root.updatingAll = ids.length > 1
+    root.updatingId = ids.length === 1 ? ids[0] : ""
+    root.updateSummary = ids.length === 1
+      ? "Updating " + ids[0] + "…"
+      : "Updating 0 of " + ids.length + "…"
+
+    var launch = [root.updateRunnerPath, root.updateStatusPath, root.updateExpectedJobId]
+    for (var i = 0; i < ids.length; i++) launch.push(ids[i])
+    try {
+      Quickshell.execDetached(launch)
+    } catch (e) {
+      root.markUpdateInterrupted("Update could not start")
+      return
+    }
+    updateStartTimer.restart()
+    updateStatusPoll.restart()
+  }
+
+  function applyUpdateJobStatus() {
+    var text = ""
+    try { text = updateStatusFile.text() } catch (e) { return }
+    if (String(text || "").trim() === "") return
+
+    var lines = String(text).split("\n")
+    var jobId = ""
+    var pid = ""
+    var total = 0
+    var current = ""
+    var completed = 0
+    var failures = 0
+    var finished = 0
+    var done = false
+    var outcomes = {}
+
+    for (var i = 0; i < lines.length; i++) {
+      var parts = lines[i].split("\t")
+      var event = parts[0]
+      if (event === "job") jobId = parts[1] || ""
+      else if (event === "pid") pid = parts[1] || ""
+      else if (event === "total") total = parseInt(parts[1] || "0")
+      else if (event === "start") current = parts[1] || ""
+      else if (event === "ok") {
+        outcomes[parts[1]] = "CURRENT"
+        completed++
+        if (current === parts[1]) current = ""
+      } else if (event === "failed") {
+        outcomes[parts[1]] = "ERROR"
+        completed++
+        failures++
+        if (current === parts[1]) current = ""
+      } else if (event === "finished") {
+        finished = parseInt(parts[1] || "0")
+      } else if (event === "done") {
+        done = true
+        completed = parseInt(parts[1] || String(completed)) + parseInt(parts[2] || String(failures))
+        failures = parseInt(parts[2] || String(failures))
+      }
+    }
+
+    // A previous completed job may still be present while the newly detached
+    // helper starts. Ignore it until this panel sees its own job id. A panel
+    // recreated by Omarchy's hot reload has no expectation and adopts the
+    // current job from disk instead.
+    var expectingJob = root.updateExpectedJobId !== ""
+    if (jobId === "" || (expectingJob && jobId !== root.updateExpectedJobId)) return
+    if (!expectingJob && done && finished > 0 && Date.now() / 1000 - finished > 300) return
+    root.updateExpectedJobId = jobId
+    root.updateAwaitingStart = false
+    updateStartTimer.stop()
+    if (pid !== root.updateProbePid) {
+      root.updateProbePid = pid
+      root.updateDeadProbeCount = 0
+    }
+
+    var states = {}
+    for (var key in root.updateStates) states[key] = root.updateStates[key]
+    for (var outcome in outcomes) states[outcome] = outcomes[outcome]
+    root.updateStates = states
+    root.updatingAll = total > 1
+    root.updatingId = current
+
+    if (done) {
+      root.updateDetachedRunning = false
+      root.updateAwaitingStart = false
+      root.updatingAll = false
+      root.updatingId = ""
+      root.updateProbePid = ""
+      root.updateDeadProbeCount = 0
+      updateStartTimer.stop()
+      updateStatusPoll.stop()
+      var successes = Math.max(0, completed - failures)
+      if (failures === 0)
+        root.updateSummary = successes === 1 ? "1 plugin updated" : successes + " plugins updated"
+      else
+        root.updateSummary = successes + " updated, " + failures + " failed"
+      root.refreshPlugins()
+      return
+    }
+
+    root.updateDetachedRunning = true
+    root.updateSummary = total > 1
+      ? "Updating " + completed + " of " + total + (current ? ": " + current : "") + "…"
+      : (current ? "Updating " + current + "…" : "Preparing update…")
+    updateStatusPoll.restart()
+  }
+
+  function recoverExistingUpdateOrFailStart() {
+    if (!root.updateAwaitingStart) return
+    root.updateAwaitingStart = false
+    root.updateExpectedJobId = ""
+    root.updateDetachedRunning = false
+    root.applyUpdateJobStatus()
+    if (!root.updateDetachedRunning)
+      root.markUpdateInterrupted("Update could not start. Another update may already be running.")
+  }
+
+  function markUpdateInterrupted(message) {
+    root.updateDetachedRunning = false
+    root.updateAwaitingStart = false
     root.updatingAll = false
-    if (exitCode === 0)
-      root.updateSummary = "All updates applied"
-    else {
-      var err = String(updateStderr.text || "").trim()
-      root.updateSummary = "Bulk update failed" + (err ? ": " + err : "")
-    }
-    root.refreshPlugins()
-    Qt.callLater(function() { root.checkUpdates() })
-  }
-
-  function onUpdateFinished(exitCode) {
-    console.log("onUpdateFinished exitCode=", exitCode, "id=", root.updatingId)
-    var id = root.updatingId
     root.updatingId = ""
-    if (exitCode === 0)
-      root.updateSummary = "Updated " + id
-    else {
-      var err = String(updateStderr.text || "").trim()
-      root.updateSummary = "Update of " + id + " failed" + (err ? ": " + err : "")
-    }
-    root.refreshPlugins()
-    Qt.callLater(function() { root.checkUpdates() })
+    root.updateExpectedJobId = ""
+    root.updateProbePid = ""
+    root.updateDeadProbeCount = 0
+    updateStartTimer.stop()
+    updateStatusPoll.stop()
+    root.updateSummary = message || "Update interrupted. Check again."
   }
 
   property Process repoScanProcess: Process {
@@ -571,7 +696,7 @@ Panel {
   property Process updateCheckProcess: Process {
     onExited: function(exitCode) {
       console.log("updateCheckProcess onExited exitCode=", exitCode, "stdout=", (updateCheckStdout.text || "").substring(0, 200))
-      root.finishUpdateCheck()
+      root.finishUpdateCheck(exitCode)
     }
     stdout: StdioCollector {
       id: updateCheckStdout
@@ -580,19 +705,53 @@ Panel {
     }
   }
 
-  property Process updateProcess: Process {
+  property Process updateProbeProcess: Process {
     onExited: function(exitCode) {
-      console.log("updateProcess onExited exitCode=", exitCode, "id=", root.updatingId)
-      root.onUpdateFinished(exitCode)
+      if (!root.updateDetachedRunning || root.updateAwaitingStart) return
+      if (exitCode === 0) {
+        root.updateDeadProbeCount = 0
+        return
+      }
+      root.updateDeadProbeCount++
+      updateStatusFile.reload()
+      if (root.updateDeadProbeCount >= 2)
+        root.markUpdateInterrupted()
     }
-    stdout: StdioCollector { id: updateStdout; waitForEnd: true }
-    stderr: StdioCollector { id: updateStderr; waitForEnd: true }
   }
 
-  property Process updateAllProcess: Process {
-    onExited: function(exitCode) {
-      console.log("updateAllProcess onExited exitCode=", exitCode)
-      root.onUpdateAllFinished(exitCode)
+  FileView {
+    id: updateStatusFile
+    path: root.updateStatusPath
+    watchChanges: true
+    printErrors: false
+    onLoaded: root.applyUpdateJobStatus()
+    onFileChanged: updateStatusFile.reload()
+  }
+
+  Timer {
+    id: updateStartTimer
+    interval: 3000
+    repeat: false
+    onTriggered: root.recoverExistingUpdateOrFailStart()
+  }
+
+  Timer {
+    id: updateStatusPoll
+    interval: 500
+    repeat: true
+    running: root.updateDetachedRunning
+    onTriggered: updateStatusFile.reload()
+  }
+
+  Timer {
+    interval: 2000
+    repeat: true
+    running: root.updateDetachedRunning && !root.updateAwaitingStart
+    onTriggered: {
+      if (!updateProbeProcess.running && /^[0-9]+$/.test(root.updateProbePid)) {
+        updateProbeProcess.command = ["bash", "-c", 'kill -0 "$0" 2>/dev/null', root.updateProbePid]
+        updateProbeProcess.running = true
+      }
     }
   }
 
@@ -766,14 +925,24 @@ Panel {
       var m = reg.installedPlugins[id]
       if (!m || typeof m !== "object") continue
       var sourceDir = String(m.__sourceDir || "")
+      var kinds = Array.isArray(m.kinds) ? m.kinds : []
+      var isBarOption = kinds.indexOf("bar") !== -1
+      var isBarWidget = kinds.indexOf("bar-widget") !== -1
+      // Built-in widgets remain loadable even while absent from the bar, so
+      // isEnabled() is intentionally true for them. The user-facing toggle is
+      // about their bar placement, matching `omarchy plugin list`.
+      var enabled = isBarWidget && typeof reg.inBar === "function"
+        ? reg.inBar(id) === true
+        : reg.isEnabled(id) === true
       rows.push({
         id: id,
         name: m.name || id,
         version: m.version || "unknown",
         author: m.author || "",
         description: m.description || "",
-        kinds: (m.kinds || []).join(", "),
-        enabled: reg.isEnabled(id) === true,
+        kinds: kinds.join(", "),
+        enabled: enabled,
+        canDisable: !isBarOption,
         firstParty: m.__isFirstParty === true,
         sourceDir: sourceDir,
         sourceKey: sourceDir.replace(/\/+$/, "").split("/").pop() || "",
@@ -793,6 +962,10 @@ Panel {
   function setPluginEnabled(id, value) {
     var reg = root.registry
     if (!reg || typeof reg.setEnabled !== "function") return
+    for (var i = 0; i < root.pluginRows.length; i++) {
+      var row = root.pluginRows[i]
+      if (row.id === id && value === false && row.canDisable === false) return
+    }
     reg.setEnabled(id, value)
   }
 
@@ -809,7 +982,10 @@ Panel {
   Component.onCompleted: {
     console.log("Panel.qml loaded, filterMode=", root.filterMode, "rows=", root.pluginRows.length)
     root.installHelperPath = String(Qt.resolvedUrl("install-helper.sh")).replace(/^file:\/\//, "")
+    root.updateHelperPath = String(Qt.resolvedUrl("plugin-state.sh")).replace(/^file:\/\//, "")
+    root.updateRunnerPath = String(Qt.resolvedUrl("update-helper.sh")).replace(/^file:\/\//, "")
     refreshPlugins()
+    Qt.callLater(function() { updateStatusFile.reload() })
   }
 
   // ------------------------------------------------------------- open / close
@@ -1013,7 +1189,7 @@ Panel {
           Button {
             iconText: "\uf021"
             tooltipText: "Check updates"
-            enabled: !root.checkingUpdates && root.updatingId === "" && !root.updatingAll
+            enabled: !root.checkingUpdates && !root.updateDetachedRunning
             foreground: root.contentForeground
             accent: Color.accent
             fontFamily: root.contentFontFamily
@@ -1251,8 +1427,8 @@ Panel {
                   Button {
                     visible: modelData.updatable
                       && root.updateStates[modelData.sourceKey] === "UPDATE"
-                    text: root.updatingId === modelData.id ? "Updating…" : "Update"
-                    enabled: root.updatingId === "" && !root.updatingAll
+                    text: root.updatingId === modelData.sourceKey ? "Updating…" : "Update"
+                    enabled: !root.updateDetachedRunning
                     bordered: true
                     foreground: root.contentForeground
                     accent: Color.accent
@@ -1261,13 +1437,14 @@ Panel {
                     horizontalPadding: Style.space(8)
                     verticalPadding: Style.space(3)
                     Layout.alignment: Qt.AlignVCenter
-                    onClicked: root.updatePlugin(modelData.id)
+                    onClicked: root.updatePlugin(modelData.sourceKey)
                   }
 
                   ToggleSwitch {
                     id: toggle
                     rounded: true
                     checked: modelData.enabled
+                    enabled: modelData.canDisable || !modelData.enabled
                     foreground: root.contentForeground
                     accent: Color.accent
                     onToggled: {
@@ -1366,7 +1543,7 @@ Panel {
       }
     }
     // Full-page view shown when the user asks to check for updates. Lists the
-    // git-managed plugins with live per-plugin status (streamed from the check
+    // third-party plugins with live per-plugin status (streamed from the check
     // process), a running progress bar while checking, and an Update all button
     // pinned to the bottom.
     Rectangle {
@@ -1399,6 +1576,19 @@ Panel {
             font.pixelSize: Style.font.body
             font.bold: true
             Layout.fillWidth: true
+          }
+
+          Button {
+            iconText: "\uf021"
+            tooltipText: "Check again"
+            enabled: !root.checkingUpdates && !root.updateDetachedRunning
+            foreground: root.contentForeground
+            accent: Color.accent
+            fontFamily: root.contentFontFamily
+            fontSize: Style.font.bodySmall
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(5)
+            onClicked: root.checkUpdates()
           }
 
           Button {
@@ -1517,8 +1707,7 @@ Panel {
               }
 
               // Per-plugin check status: a ring spinner while the fetch for this
-              // plugin is still running, a check icon once it finished (whether
-              // current, update available, or errored).
+              // plugin is still running, then a check or warning icon.
               Item {
                 id: checkRing
                 visible: root.updateStates[modelData.sourceKey] === "CHECK"
@@ -1569,10 +1758,11 @@ Panel {
               Label {
                 visible: {
                   var st = root.updateStates[modelData.sourceKey]
-                  st === "CURRENT" || st === "UPDATE" || st === "ERROR"
+                  st === "CURRENT" || st === "UPDATE" || st === "LOCAL_CHANGES"
+                    || st === "LOCAL" || st === "ERROR"
                 }
                 Layout.alignment: Qt.AlignVCenter
-                text: "\uf00c"
+                text: root.updateStates[modelData.sourceKey] === "ERROR" ? "\uf071" : "\uf00c"
                 color: {
                   var st = root.updateStates[modelData.sourceKey]
                   if (st === "ERROR") return Color.urgent
@@ -1627,7 +1817,7 @@ Panel {
           Button {
             text: root.updatingAll ? "Updating all…" : "Update all"
             enabled: root.pendingUpdateCount > 0
-              && !root.checkingUpdates && root.updatingId === "" && !root.updatingAll
+              && !root.checkingUpdates && !root.updateDetachedRunning
             visible: root.pendingUpdateCount > 0
             foreground: root.contentForeground
             accent: Color.accent
@@ -1683,7 +1873,11 @@ Panel {
           property var plugin: root.rowMenuPlugin()
 
           Button {
-            text: rowMenuColumn.plugin && rowMenuColumn.plugin.enabled ? "Disable" : "Enable"
+            text: rowMenuColumn.plugin && rowMenuColumn.plugin.enabled
+              ? (rowMenuColumn.plugin.canDisable ? "Disable" : "Active bar")
+              : "Enable"
+            enabled: rowMenuColumn.plugin
+              && (rowMenuColumn.plugin.canDisable || !rowMenuColumn.plugin.enabled)
             foreground: root.contentForeground
             accent: Color.accent
             fontFamily: root.contentFontFamily
