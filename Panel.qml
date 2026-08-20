@@ -32,6 +32,13 @@ Panel {
 
   property var pluginRows: []
 
+  // The shell injects the PluginRegistry into the bar's `shell` (the built-in
+  // Bar.qml exposes no `pluginRegistry` property itself), so resolve it there
+  // with a fallback for custom bars that do carry the registry directly.
+  readonly property var registry: root.bar && root.bar.shell
+    ? root.bar.shell.pluginRegistry
+    : (root.bar ? root.bar.pluginRegistry : null)
+
   // Git remote URLs for updatable plugins, keyed by sourceKey. Filled by a
   // background `git remote get-url` scan so each row can offer a repo link.
   property var pluginRepos: ({})
@@ -329,7 +336,7 @@ Panel {
   // Reads `git remote get-url origin` for every git-managed plugin dir and
   // fills pluginRepos (keyed by folder name) so each row can offer a repo link.
   function scanPluginRepos() {
-    var reg = root.bar ? root.bar.pluginRegistry : null
+    var reg = root.registry
     var dir = reg && reg.pluginsDir ? reg.pluginsDir : ""
     if (!dir || root.reposScanning) return
     root.reposScanning = true
@@ -376,7 +383,7 @@ Panel {
   // show per-plugin progress while the fetch runs, then the result line.
   function checkUpdates() {
     console.log("checkUpdates start, checkingUpdates=", root.checkingUpdates, "updatingId=", root.updatingId)
-    var reg = root.bar ? root.bar.pluginRegistry : null
+    var reg = root.registry
     var dir = reg && reg.pluginsDir ? reg.pluginsDir : ""
     console.log("pluginsDir=", dir)
     if (!dir || root.checkingUpdates || root.updatingId !== "") return
@@ -714,7 +721,7 @@ Panel {
   }
 
   function refreshPlugins() {
-    var reg = root.bar ? root.bar.pluginRegistry : null
+    var reg = root.registry
     if (!reg || !reg.installedPlugins) {
       pluginRows = []
       return
@@ -750,18 +757,18 @@ Panel {
   }
 
   function setPluginEnabled(id, value) {
-    var reg = root.bar ? root.bar.pluginRegistry : null
+    var reg = root.registry
     if (!reg || typeof reg.setEnabled !== "function") return
     reg.setEnabled(id, value)
   }
 
   function registryRevision() {
-    var reg = root.bar ? root.bar.pluginRegistry : null
+    var reg = root.registry
     return reg ? reg.registryRevision : 0
   }
 
   Connections {
-    target: root.bar ? root.bar.pluginRegistry : null
+    target: root.registry
     function onRegistryRevisionChanged() { root.refreshPlugins() }
   }
 
