@@ -6,16 +6,28 @@ Omaplug is a little popup panel that lives in your Omarchy bar and puts every in
 
 ## Screenshots
 
-<p align="center">
-  <img src="preview_main.png" alt="Main plugin list" width="420"/>
-  <img src="preview_check-update.png" alt="Checking for updates" width="420"/>
-</p>
-
-<p align="center">
-  <img src="preview_install.png" alt="Installing a plugin" width="420"/>
-  <img src="preview_filter.png" alt="Filtering and searching" width="420"/>
-  <img src="preview_action.png" alt="Row action menu" width="420"/>
-</p>
+<table>
+  <tr>
+    <td align="center"><img src="preview_main.png" alt="Main plugin list" width="280"/></td>
+    <td align="center"><img src="preview_check-update.png" alt="Checking for updates" width="280"/></td>
+    <td align="center"><img src="preview_install.png" alt="Installing a plugin" width="280"/></td>
+  </tr>
+  <tr>
+    <td align="center">Plugin list</td>
+    <td align="center">Checking for updates</td>
+    <td align="center">Installing a plugin</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="preview_filter.png" alt="Filtering and searching" width="280"/></td>
+    <td align="center"><img src="preview_action.png" alt="Row action menu" width="280"/></td>
+    <td align="center"></td>
+  </tr>
+  <tr>
+    <td align="center">Filtering and searching</td>
+    <td align="center">Row action menu</td>
+    <td align="center"></td>
+  </tr>
+</table>
 
 ## What it can do
 
