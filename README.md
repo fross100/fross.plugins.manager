@@ -52,6 +52,54 @@ omarchy plugin add https://github.com/fross100/omaplug --enable
 omarchy plugin remove omaplug
 ```
 
+## Remove manually
+
+No terminal? No problem — or maybe you just like doing things the hands-on way. Here's how to remove it by hand:
+
+1. Delete the plugin folder:
+
+```bash
+rm -rf ~/.config/omarchy/plugins/omaplug
+```
+
+2. Remove the `"id": "omaplug"` entry from the bar layout in `~/.config/omarchy/shell.json`.
+
+3. Restart the shell to apply:
+
+```bash
+omarchy-restart-shell
+```
+
+## Development
+
+Want to tinker with the code? Clone the repo and point Omarchy at your working copy:
+
+```bash
+git clone https://github.com/fross100/omaplug.git
+cd omaplug
+omarchy dev link "$PWD"
+```
+
+Edit the QML however you like, then restart the shell to see the changes:
+
+```bash
+omarchy-restart-shell
+```
+
+(Or, from inside the plugin manager, just hit the **Restart shell** button — it clears the QML cache and reloads everything from source.)
+
+Before sharing your work, make sure the manifest is valid:
+
+```bash
+omarchy plugin validate .
+```
+
+When you're done, point Omarchy back at the packaged install:
+
+```bash
+omarchy dev unlink
+```
+
 ## Requirements
 
 - Omarchy 4.x
