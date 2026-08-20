@@ -91,6 +91,10 @@ Panel {
   property bool removingPlugin: false
   property bool removeConfirmOpen: false
   property var removePending: []
+  // Confirmation before restarting the shell: clears the QML compile cache and
+  // relaunches the shell so plugins reload from source (fixes stale compiled
+  // plugin QML that a live rescan would keep serving).
+  property bool restartConfirmOpen: false
   // Right-click context menu on a main-page row.
   property bool rowMenuOpen: false
   property string rowMenuId: ""
@@ -305,6 +309,25 @@ Panel {
   function cancelRemove() {
     root.removePending = []
     root.removeConfirmOpen = false
+  }
+
+  function requestRestartShell() {
+    root.restartConfirmOpen = true
+  }
+
+  function cancelRestartShell() {
+    root.restartConfirmOpen = false
+  }
+
+  // Clear the QML compile cache and restart the shell. The shell dies as part
+  // of the restart, so the whole job is detached with setsid/nohup and the
+  // Process that fires it exits immediately.
+  function confirmRestartShell() {
+    root.restartConfirmOpen = false
+    var script = 'rm -rf "$HOME/.cache/quickshell/qmlcache" "$HOME/.cache/quickshell"/qtpipelinecache-*; omarchy-restart-shell'
+    restartShellProcess.command = ["bash", "-c",
+      'setsid nohup bash -c "$0" >/dev/null 2>&1 &', script]
+    restartShellProcess.running = true
   }
 
   function removeNext() {
@@ -587,6 +610,14 @@ Panel {
     stderr: StdioCollector { id: removeStderr; waitForEnd: true }
   }
 
+  // Launches the detached shell restart. The shell dies mid-command, so the
+  // work runs setsid/nohup from a short-lived Process that exits immediately.
+  property Process restartShellProcess: Process {
+    onExited: function(exitCode) {
+      console.log("restartShellProcess onExited exitCode=", exitCode)
+    }
+  }
+
   // Accepts either a bare git URL or a full `omarchy plugin add <url>`
   // command. Returns the URL token, or "" if none can be found.
   function extractInstallUrl(text) {
@@ -792,6 +823,7 @@ Panel {
     root.installDialogOpen = false
     root.updatesPageOpen = false
     root.removeConfirmOpen = false
+    root.restartConfirmOpen = false
     root.removeSelectMode = false
     root.removeSelection = {}
     root.closeRowMenu()
@@ -907,6 +939,21 @@ Panel {
                 verticalPadding: Style.space(3)
                 Layout.alignment: Qt.AlignVCenter
                 onClicked: Qt.openUrlExternally("https://omarchyplugins.com")
+              }
+
+              Button {
+                id: restartShellButton
+                text: "\uf021  Restart shell"
+                tooltipText: "Clear the QML cache and restart the shell so every plugin reloads from source"
+                bordered: true
+                foreground: root.contentForeground
+                accent: Color.accent
+                fontFamily: root.contentFontFamily
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(8)
+                verticalPadding: Style.space(3)
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: root.requestRestartShell()
               }
             }
 
@@ -1773,6 +1820,89 @@ Panel {
               horizontalPadding: Style.space(12)
               verticalPadding: Style.space(6)
               onClicked: root.confirmRemove()
+            }
+          }
+        }
+      }
+    }
+
+    // Confirmation before restarting the shell. Warns that the shell (and this
+    // panel) will briefly disappear while plugins reload from source.
+    Rectangle {
+      id: restartConfirmDialog
+      visible: root.restartConfirmOpen
+      anchors.fill: parent
+      z: 7000
+      color: Util.alpha(root.panelBackground, 0.7)
+      focus: true
+      Keys.priority: Keys.BeforeItem
+      Keys.onEscapePressed: root.cancelRestartShell()
+
+      MouseArea {
+        anchors.fill: parent
+        onClicked: root.cancelRestartShell()
+      }
+
+      Rectangle {
+        id: restartConfirmCard
+        anchors.centerIn: parent
+        width: Math.min(parent.width - Style.space(32), Style.space(360))
+        height: restartConfirmColumn.implicitHeight + Style.space(36)
+        color: root.panelBackground
+        radius: Style.cornerRadius
+        border.color: Style.selectedStateColor(root.contentForeground, Color.accent)
+        border.width: 1
+
+        ColumnLayout {
+          id: restartConfirmColumn
+          anchors.fill: parent
+          anchors.margins: Style.space(18)
+          spacing: Style.space(12)
+
+          Text {
+            text: "Restart the shell?"
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.title
+            font.bold: true
+            Layout.fillWidth: true
+          }
+
+          Text {
+            text: "The shell (and this panel) will restart so every plugin reloads from source. This fixes plugins that still run stale compiled QML. Unsaved panel state will be lost."
+            color: Qt.darker(root.contentForeground, 1.6)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+          }
+
+          RowLayout {
+            Layout.fillWidth: true
+
+            Item { Layout.fillWidth: true }
+
+            Button {
+              text: "Cancel"
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(12)
+              verticalPadding: Style.space(6)
+              onClicked: root.cancelRestartShell()
+            }
+
+            Button {
+              text: "Restart"
+              bordered: true
+              foreground: root.contentForeground
+              accent: Color.accent
+              fontFamily: root.contentFontFamily
+              fontSize: Style.font.bodySmall
+              horizontalPadding: Style.space(12)
+              verticalPadding: Style.space(6)
+              onClicked: root.confirmRestartShell()
             }
           }
         }
