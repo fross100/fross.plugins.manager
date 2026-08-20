@@ -75,10 +75,8 @@ Panel {
   property string installStatusPath: ""
   property bool installDetachedRunning: false
 
-  // Plugin removal page state. Only third-party plugins are listed; each row
-  // gets a trash button for a single remove, and a multi-select mode (check
-  // list) removes several at once via a sequential queue.
-  property bool removePageOpen: false
+  // Plugin removal state. Each row gets a trash button for a single remove, and
+  // a select mode (check list) removes several at once via a sequential queue.
   property var removeSelection: ({})
   property bool removeSelectMode: false
   property string removeSummary: ""
@@ -86,7 +84,6 @@ Panel {
   property bool removingPlugin: false
   property bool removeConfirmOpen: false
   property var removePending: []
-  property string removeSearchText: ""
   // Right-click context menu on a main-page row.
   property bool rowMenuOpen: false
   property string rowMenuId: ""
@@ -261,19 +258,6 @@ Panel {
       parts.push(root.pendingUpdateCount + " update" + (root.pendingUpdateCount > 1 ? "s" : "") + " available")
     parts.join(" · ")
   }
-
-  // Plugins that may be removed: only third-party (not omarchy first-party).
-  readonly property var removableRows: root.pluginRows.filter(function(p) { return !p.firstParty })
-
-  // Remove-page rows honoring the remove search field.
-  readonly property var removeVisibleRows: root.removableRows.filter(function(p) {
-    var q = root.removeSearchText.trim().toLowerCase()
-    if (q === "") return true
-    return String(p.name || "").toLowerCase().indexOf(q) !== -1
-      || String(p.description || "").toLowerCase().indexOf(q) !== -1
-      || String(p.id || "").toLowerCase().indexOf(q) !== -1
-      || String(p.author || "").toLowerCase().indexOf(q) !== -1
-  })
 
   readonly property int selectedRemoveCount: {
     var n = 0
@@ -799,8 +783,10 @@ Panel {
   function close() {
     root.installDialogOpen = false
     root.updatesPageOpen = false
-    root.removePageOpen = false
     root.removeConfirmOpen = false
+    root.removeSelectMode = false
+    root.removeSelection = {}
+    root.closeRowMenu()
     root.controller.hide()
   }
 
@@ -983,15 +969,19 @@ Panel {
           }
 
           Button {
-            iconText: "\uf1f8"
-            tooltipText: "Remove plugins"
+            text: root.removeSelectMode ? "Done" : "Select"
+            tooltipText: "Select plugins to remove"
+            enabled: !root.removingPlugin
             foreground: root.contentForeground
             accent: Color.accent
             fontFamily: root.contentFontFamily
             fontSize: Style.font.bodySmall
             horizontalPadding: Style.space(10)
             verticalPadding: Style.space(5)
-            onClicked: root.removePageOpen = true
+            onClicked: {
+              root.removeSelectMode = !root.removeSelectMode
+              if (!root.removeSelectMode) root.removeSelection = {}
+            }
           }
         }
 
@@ -1158,6 +1148,20 @@ Panel {
                   spacing: Style.space(6)
 
                   Button {
+                    visible: root.removeSelectMode
+                    text: root.removeSelection[modelData.id] === true ? "\uf14a" : "\uf0c8"
+                    tooltipText: "Select " + modelData.name
+                    enabled: !root.removingPlugin
+                    foreground: root.contentForeground
+                    accent: Color.accent
+                    fontFamily: root.contentFontFamily
+                    fontSize: Style.font.bodySmall
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(3)
+                    onClicked: root.toggleRemoveSelection(modelData.id)
+                  }
+
+                  Button {
                     visible: modelData.updatable
                       && root.pluginRepos[modelData.sourceKey] !== undefined
                     tooltipText: root.pluginRepos[modelData.sourceKey] !== undefined
@@ -1182,6 +1186,25 @@ Panel {
                     accent: Color.accent
                     onToggled: {
                       Qt.callLater(function() { root.setPluginEnabled(modelData.id, !modelData.enabled) })
+                    }
+                  }
+
+                  Button {
+                    id: rowMenuButton
+                    iconText: "\uf142"
+                    tooltipText: "More actions"
+                    visible: !modelData.firstParty
+                    bordered: true
+                    foreground: root.contentForeground
+                    accent: Color.accent
+                    fontFamily: root.contentFontFamily
+                    fontSize: Style.font.bodySmall
+                    horizontalPadding: Style.space(6)
+                    verticalPadding: Style.space(3)
+                    onClicked: {
+                      var btn = rowMenuButton
+                      var pt = btn.mapToItem(root, 0, btn.height)
+                      root.openRowMenu(modelData.id, pt.x, pt.y)
                     }
                   }
                 }
@@ -1232,10 +1255,38 @@ Panel {
             }
           }
         }
+
+        RowLayout {
+          Layout.fillWidth: true
+          spacing: Style.space(8)
+
+          Label {
+            visible: root.removeSummary !== ""
+            text: root.removeSummary
+            color: Style.selectedStateColor(root.contentForeground, Color.accent)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          Item {
+            Layout.fillWidth: true
+          }
+
+          Button {
+            visible: root.removeSelectMode && root.selectedRemoveCount > 0
+            text: "Remove selected (" + root.selectedRemoveCount + ")"
+            enabled: !root.removingPlugin
+            foreground: root.contentForeground
+            accent: Color.urgent
+            fontFamily: root.contentFontFamily
+            fontSize: Style.font.bodySmall
+            horizontalPadding: Style.space(12)
+            verticalPadding: Style.space(6)
+            onClicked: root.removeSelected()
+          }
+        }
       }
     }
-
-    // ── Check for updates page ────────────────────────────────────────────────
     // Full-page view shown when the user asks to check for updates. Lists the
     // git-managed plugins with live per-plugin status (streamed from the check
     // process), a running progress bar while checking, and an Update all button
@@ -1513,234 +1564,6 @@ Panel {
       }
     }
 
-    // ── Remove plugins page ──────────────────────────────────────────────────
-    // Full-page view listing third-party plugins with a trash button per row and
-    // a check-list mode to select several and remove them in one go.
-    Rectangle {
-      id: removePage
-      visible: root.removePageOpen
-      anchors.fill: parent
-      z: 5000
-      color: root.panelBackground
-
-      PanelKeyCatcher {
-        anchors.fill: parent
-        onCloseRequested: root.removePageOpen = false
-        onTabRequested: function(direction) { root.switchPanel(direction) }
-      }
-
-      ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Style.space(16)
-        anchors.topMargin: appHeader.height + Style.space(16)
-        spacing: Style.space(10)
-
-        RowLayout {
-          Layout.fillWidth: true
-          spacing: Style.space(8)
-
-          Label {
-            text: "Remove plugins"
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.body
-            font.bold: true
-          }
-
-          TextField {
-            id: removeSearchField
-            Layout.fillWidth: true
-            placeholderText: "Search plugins to remove…"
-            foreground: root.contentForeground
-            accent: Color.accent
-            font.family: root.contentFontFamily
-            text: root.removeSearchText
-            onTextChanged: root.removeSearchText = text
-            Keys.onEscapePressed: { root.removePageOpen = false }
-          }
-
-          Button {
-            text: root.removeSelectMode ? "Done" : "Select"
-            enabled: !root.removingPlugin
-            foreground: root.contentForeground
-            accent: Color.accent
-            fontFamily: root.contentFontFamily
-            fontSize: Style.font.bodySmall
-            horizontalPadding: Style.space(10)
-            verticalPadding: Style.space(5)
-            onClicked: {
-              root.removeSelectMode = !root.removeSelectMode
-              if (!root.removeSelectMode) root.removeSelection = {}
-            }
-          }
-
-          Button {
-            text: "Back"
-            enabled: !root.removingPlugin
-            foreground: root.contentForeground
-            accent: Color.accent
-            fontFamily: root.contentFontFamily
-            fontSize: Style.font.bodySmall
-            horizontalPadding: Style.space(10)
-            verticalPadding: Style.space(5)
-            onClicked: root.removePageOpen = false
-          }
-        }
-
-        ListView {
-          id: removeList
-          Layout.fillWidth: true
-          Layout.fillHeight: true
-          clip: true
-          spacing: Style.space(4)
-          model: root.removeVisibleRows
-          ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-            implicitWidth: Style.space(6)
-            contentItem: Rectangle {
-              implicitWidth: Style.space(6)
-              implicitHeight: Style.space(6)
-              radius: width / 2
-              color: Util.alpha(root.contentForeground, 0.45)
-            }
-          }
-
-          delegate: Rectangle {
-            required property var modelData
-            width: removeList.width
-            height: Math.max(Style.space(52), row.implicitHeight + Style.space(16))
-            radius: Style.cornerRadius > 0 ? Style.cornerRadius : 4
-            color: hover.hovered
-              ? Style.hoverFillFor(root.contentForeground, Color.accent)
-              : "transparent"
-
-            RowLayout {
-              id: row
-              anchors.fill: parent
-              anchors.leftMargin: Style.space(10)
-              anchors.topMargin: Style.space(8)
-              anchors.rightMargin: Style.space(10)
-              anchors.bottomMargin: Style.space(12)
-              spacing: Style.space(10)
-
-              Rectangle {
-                id: removeIcon
-                width: Style.space(28)
-                height: width
-                radius: 6
-                color: root.iconColorFor(modelData.name)
-
-                Text {
-                  anchors.centerIn: parent
-                  text: root.iconFor(modelData.id) || modelData.name.trim().charAt(0).toUpperCase()
-                  color: "white"
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: true
-                }
-              }
-
-              ColumnLayout {
-                Layout.fillWidth: true
-                Layout.alignment: Qt.AlignVCenter
-                spacing: Style.space(2)
-
-                Label {
-                  text: modelData.name
-                  color: root.contentForeground
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.body
-                  font.bold: true
-                  Layout.fillWidth: true
-                  elide: Label.ElideRight
-                }
-
-                Label {
-                  text: modelData.description !== "" ? modelData.description : "No description"
-                  color: Qt.darker(root.contentForeground, 1.6)
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.caption
-                  Layout.fillWidth: true
-                  wrapMode: Label.Wrap
-                  maximumLineCount: 2
-                  elide: Label.ElideRight
-                }
-              }
-
-              Button {
-                visible: root.removeSelectMode
-                text: root.removeSelection[modelData.id] === true ? "\uf14a" : "\uf0c8"
-                foreground: root.contentForeground
-                accent: Color.accent
-                fontFamily: root.contentFontFamily
-                fontSize: Style.font.body
-                horizontalPadding: Style.space(6)
-                verticalPadding: Style.space(3)
-                onClicked: root.toggleRemoveSelection(modelData.id)
-              }
-
-              Button {
-                text: "\uf1f8"
-                tooltipText: "Remove " + modelData.name
-                enabled: !root.removingPlugin
-                bordered: true
-                foreground: root.contentForeground
-                accent: Color.urgent
-                fontFamily: root.contentFontFamily
-                fontSize: Style.font.body
-                horizontalPadding: Style.space(6)
-                verticalPadding: Style.space(3)
-                onClicked: root.removePlugin(modelData.id)
-              }
-            }
-
-            HoverHandler {
-              id: hover
-            }
-
-            Rectangle {
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.bottom: parent.bottom
-              anchors.leftMargin: Style.space(10)
-              anchors.rightMargin: Style.space(10)
-              height: 1
-              color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.12)
-            }
-          }
-        }
-
-        RowLayout {
-          Layout.fillWidth: true
-          spacing: Style.space(8)
-
-          Label {
-            visible: root.removeSummary !== ""
-            text: root.removeSummary
-            color: Style.selectedStateColor(root.contentForeground, Color.accent)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-          }
-
-          Item {
-            Layout.fillWidth: true
-          }
-
-          Button {
-            visible: root.removeSelectMode && root.selectedRemoveCount > 0
-            text: "Remove selected (" + root.selectedRemoveCount + ")"
-            enabled: !root.removingPlugin
-            foreground: root.contentForeground
-            accent: Color.urgent
-            fontFamily: root.contentFontFamily
-            fontSize: Style.font.bodySmall
-            horizontalPadding: Style.space(12)
-            verticalPadding: Style.space(6)
-            onClicked: root.removeSelected()
-          }
-        }
-      }
-    }
 
     // ── Row context menu ─────────────────────────────────────────────────────
     // Right-click on a plugin row on the main page opens a small menu with the
@@ -1782,7 +1605,7 @@ Panel {
           property var plugin: root.rowMenuPlugin()
 
           Label {
-            text: plugin ? plugin.name : ""
+            text: rowMenuColumn.plugin ? rowMenuColumn.plugin.name : ""
             color: root.contentForeground
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -1793,7 +1616,7 @@ Panel {
           }
 
           Button {
-            text: plugin && plugin.enabled ? "Disable" : "Enable"
+            text: rowMenuColumn.plugin && rowMenuColumn.plugin.enabled ? "Disable" : "Enable"
             foreground: root.contentForeground
             accent: Color.accent
             fontFamily: root.contentFontFamily
@@ -1803,13 +1626,13 @@ Panel {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignLeft
             onClicked: {
-              root.setPluginEnabled(root.rowMenuId, !plugin.enabled)
+              root.setPluginEnabled(root.rowMenuId, !rowMenuColumn.plugin.enabled)
               root.closeRowMenu()
             }
           }
 
           Button {
-            visible: plugin && plugin.sourceKey !== "" && root.pluginRepos[plugin.sourceKey] !== undefined
+            visible: rowMenuColumn.plugin && rowMenuColumn.plugin.sourceKey !== "" && root.pluginRepos[rowMenuColumn.plugin.sourceKey] !== undefined
             text: "Source"
             foreground: root.contentForeground
             accent: Color.accent
@@ -1820,13 +1643,13 @@ Panel {
             Layout.fillWidth: true
             Layout.alignment: Qt.AlignLeft
             onClicked: {
-              root.openPluginRepo(plugin.sourceKey)
+              root.openPluginRepo(rowMenuColumn.plugin.sourceKey)
               root.closeRowMenu()
             }
           }
 
           Button {
-            visible: plugin && !plugin.firstParty
+            visible: rowMenuColumn.plugin && !rowMenuColumn.plugin.firstParty
             text: "Remove"
             foreground: Color.urgent
             accent: Color.urgent
