@@ -175,6 +175,9 @@ Panel {
   }
 
   function iconFor(id) {
+    // The clock widget's live button text is the current time, which reads
+    // like noise as a row icon — always show the clock glyph for it instead.
+    if (/clock/i.test(String(id))) return "\uf64f"
     var live = root.liveGlyphFor(id)
     if (live) return live
     var map = {
