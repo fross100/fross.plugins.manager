@@ -889,7 +889,7 @@ Panel {
 
               Button {
                 id: marketplaceButton
-                text: "\uf1d8  Marketplace"
+                text: "\udb86\ude6f  Marketplace"
                 tooltipText: "Open the Omarchy plugin marketplace"
                 bordered: true
                 foreground: root.contentForeground
