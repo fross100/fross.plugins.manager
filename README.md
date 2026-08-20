@@ -70,36 +70,6 @@ rm -rf ~/.config/omarchy/plugins/omaplug
 omarchy-restart-shell
 ```
 
-## Development
-
-Want to tinker with the code? Clone the repo and link it into your plugins folder as a symlink, so you're always editing the file the shell actually loads:
-
-```bash
-git clone https://github.com/fross100/omaplug.git
-cd omaplug
-
-# swap the installed copy for a symlink to your checkout
-rm -rf ~/.config/omarchy/plugins/omaplug
-ln -s "$PWD" ~/.config/omarchy/plugins/omaplug
-
-omarchy-restart-shell
-```
-
-Now edit `Panel.qml` however you like and restart the shell to see your changes — the Restart shell button inside the plugin does the same thing (it clears the QML cache so you always get a fresh compile).
-
-Before sharing your work, make sure the manifest is valid:
-
-```bash
-omarchy plugin validate .
-```
-
-When you're done developing, point the plugin back at a normal install:
-
-```bash
-rm ~/.config/omarchy/plugins/omaplug
-omarchy plugin add https://github.com/fross100/omaplug --enable
-```
-
 ## Requirements
 
 - Omarchy 4.x
