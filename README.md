@@ -79,7 +79,8 @@ omarchy-restart-shell
 
 - Omarchy 4.x
 - Quickshell
-- `git` and the `omarchy` CLI
+- `git`, `jq`, and the `omarchy` CLI
+- Standard coreutils (`setsid`, `nohup`, `timeout`, `sed`)
 
 ## License
 

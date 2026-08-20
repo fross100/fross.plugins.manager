@@ -4,6 +4,7 @@
   "name": "Plugin Manager",
   "version": "1.0.0",
   "author": "Fross",
+  "license": "MIT",
   "description": "Manage installed Omarchy plugins: enable/disable, update, install from git, and remove third-party plugins",
   "kinds": [
     "bar-widget"
