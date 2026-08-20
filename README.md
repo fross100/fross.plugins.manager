@@ -1,8 +1,13 @@
 # 🧩 Omaplug
 
-**Your plugin HQ, right on the bar.**
+**A small tool for managing your Omarchy plugins.**
 
-Omaplug is a little popup panel that lives in your Omarchy bar and puts every installed plugin in one tidy place. Toggle things on and off, check for and apply updates, install new plugins from a git link, or clean out third-party plugins you no longer use — all without touching a terminal.
+Access it right from the Omarchy bar — it gives you a centralized place to view and organize the plugins you have installed. Here are a few things you can use it for:
+
+- Easily turn individual plugins on or off as needed.
+- Check for available updates and update them individually — or all at once.
+- Remove plugins individually, or several in one go.
+- Jump straight to each plugin's repo, or browse the [Omarchy marketplace](https://omarchyplugins.com).
 
 ## Screenshots
 
