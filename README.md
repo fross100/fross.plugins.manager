@@ -51,6 +51,42 @@ Access it right from the Omarchy bar — it gives you a centralized place to vie
 omarchy plugin add https://github.com/fross100/omaplug --enable
 ```
 
+## Key binding (toggle with Super+Alt+P)
+
+Omaplug exposes `omarchy-shell shell toggle omaplug` via the shell IPC (`BarWidget.qml:55` / `Ui/Panel.qml:17`). Use it from a terminal, or bind it to a key.
+
+**Hyprland (Omarchy) — recommended:**
+
+Add to `~/.config/hypr/bindings.lua` (loaded via `~/.config/hypr/hyprland.lua` → `require("hypr.bindings")`):
+
+```lua
+o.bind("SUPER + ALT + P", "Plugin Manager", "omarchy-shell shell toggle omaplug")
+```
+
+Reload Hyprland:
+
+```bash
+hyprctl reload
+hyprctl -j binds | grep -i "Plugin Manager"  # should show P modmask 72
+```
+
+**Legacy Hyprland conf** (still sourced by `~/.config/hypr/hyprland.conf:18`):
+
+```ini
+bindd = SUPER ALT, P, Plugin Manager, exec, omarchy-shell shell toggle omaplug
+```
+
+**Manual / terminal:**
+
+```bash
+omarchy-shell shell toggle omaplug   # open/close
+omarchy-shell shell toggle omaplug   # same — Hyprland wrapper adds payload "{}"
+# direct qs (needs correct OMARCHY_PATH=/usr/share/omarchy):
+qs ipc -n -p /usr/share/omarchy/shell call shell toggle omaplug "{}"
+```
+
+`BarWidget.qml:16-18` delegates `togglePanel() → panelItem.toggle() → Panel.qml:836: controller.show()/hide()` via the bar's popout coordinator, so `shell toggle omaplug` is preferred over `qs … call omaplug toggle`.
+
 ## Remove
 
 ```bash
