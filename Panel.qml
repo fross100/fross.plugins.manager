@@ -1010,14 +1010,6 @@ Panel {
             Layout.fillWidth: true
           }
 
-          Label {
-            visible: root.updateSummary !== ""
-            text: root.updateSummary
-            color: Style.selectedStateColor(root.contentForeground, Color.accent)
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-          }
-
           Button {
             iconText: "\uf021"
             tooltipText: "Check updates"
@@ -1256,6 +1248,22 @@ Panel {
                     onClicked: root.openPluginRepo(modelData.sourceKey)
                   }
 
+                  Button {
+                    visible: modelData.updatable
+                      && root.updateStates[modelData.sourceKey] === "UPDATE"
+                    text: root.updatingId === modelData.id ? "Updating…" : "Update"
+                    enabled: root.updatingId === "" && !root.updatingAll
+                    bordered: true
+                    foreground: root.contentForeground
+                    accent: Color.accent
+                    fontFamily: root.contentFontFamily
+                    fontSize: Style.font.caption
+                    horizontalPadding: Style.space(8)
+                    verticalPadding: Style.space(3)
+                    Layout.alignment: Qt.AlignVCenter
+                    onClicked: root.updatePlugin(modelData.id)
+                  }
+
                   ToggleSwitch {
                     id: toggle
                     rounded: true
@@ -1285,22 +1293,6 @@ Panel {
                       root.openRowMenu(modelData.id, pt.x, pt.y)
                     }
                   }
-                }
-
-                Button {
-                  visible: modelData.updatable
-                    && root.updateStates[modelData.sourceKey] === "UPDATE"
-                  text: root.updatingId === modelData.id ? "Updating…" : "Update"
-                  enabled: root.updatingId === "" && !root.updatingAll
-                  bordered: true
-                  foreground: root.contentForeground
-                  accent: Color.accent
-                  fontFamily: root.contentFontFamily
-                  fontSize: Style.font.caption
-                  horizontalPadding: Style.space(8)
-                  verticalPadding: Style.space(3)
-                  Layout.alignment: Qt.AlignHCenter
-                  onClicked: root.updatePlugin(modelData.id)
                 }
               }
             }
@@ -1337,6 +1329,14 @@ Panel {
         RowLayout {
           Layout.fillWidth: true
           spacing: Style.space(8)
+
+          Label {
+            visible: root.updateSummary !== ""
+            text: root.updateSummary
+            color: Style.selectedStateColor(root.contentForeground, Color.accent)
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
 
           Label {
             visible: root.removeSummary !== ""
