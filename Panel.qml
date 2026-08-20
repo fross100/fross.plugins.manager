@@ -91,10 +91,6 @@ Panel {
   property bool rowMenuOpen: false
   property string rowMenuId: ""
   property var rowMenuPos: ({ x: 0, y: 0 })
-  onRowMenuOpenChanged: {
-    if (root.rowMenuOpen) rowMenu.open()
-    else rowMenu.close()
-  }
   onInstallDialogOpenChanged: {
     if (root.installDialogOpen) {
       root.installRunning = false
@@ -1749,93 +1745,102 @@ Panel {
     // ── Row context menu ─────────────────────────────────────────────────────
     // Right-click on a plugin row on the main page opens a small menu with the
     // same actions the row buttons offer: enable/disable, open the source repo
-    // (when known), and remove.
-    Popup {
-      id: rowMenu
-      parent: root.contentItem ? root.contentItem : root
-      x: root.rowMenuPos.x
-      y: root.rowMenuPos.y
-      padding: Style.space(4)
-      focus: true
+    // (when known), and remove. Implemented as an overlay Rectangle (matching
+    // the other dialogs) instead of a QQC Popup.
+    Rectangle {
+      id: rowMenuOverlay
+      visible: root.rowMenuOpen
+      anchors.fill: parent
       z: 12000
-      closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+      focus: true
+      Keys.priority: Keys.BeforeItem
+      Keys.onEscapePressed: root.closeRowMenu()
 
-      onVisibleChanged: {
-        if (!visible) root.rowMenuOpen = false
+      MouseArea {
+        anchors.fill: parent
+        onClicked: root.closeRowMenu()
       }
 
-      background: Rectangle {
+      Rectangle {
+        id: rowMenu
+        x: Math.min(root.rowMenuPos.x, parent.width - width - Style.space(4))
+        y: Math.min(root.rowMenuPos.y, parent.height - height - Style.space(4))
+        width: rowMenuColumn.implicitWidth + Style.space(8)
+        height: rowMenuColumn.implicitHeight + Style.space(8)
         color: root.panelBackground
         radius: Style.cornerRadius
         border.color: Util.alpha(root.contentForeground, 0.2)
         border.width: 1
-      }
 
-      contentItem: ColumnLayout {
-        spacing: Style.space(2)
-        implicitWidth: Style.space(180)
+        ColumnLayout {
+          id: rowMenuColumn
+          anchors.fill: parent
+          anchors.margins: Style.space(4)
+          spacing: Style.space(2)
+          implicitWidth: Style.space(180)
 
-        property var plugin: root.rowMenuPlugin()
+          property var plugin: root.rowMenuPlugin()
 
-        Label {
-          text: plugin ? plugin.name : ""
-          color: root.contentForeground
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.bodySmall
-          font.bold: true
-          Layout.fillWidth: true
-          elide: Label.ElideRight
-          Layout.margins: Style.space(6)
-        }
-
-        Button {
-          text: plugin && plugin.enabled ? "Disable" : "Enable"
-          foreground: root.contentForeground
-          accent: Color.accent
-          fontFamily: root.contentFontFamily
-          fontSize: Style.font.bodySmall
-          horizontalPadding: Style.space(8)
-          verticalPadding: Style.space(5)
-          Layout.fillWidth: true
-          Layout.alignment: Qt.AlignLeft
-          onClicked: {
-            root.setPluginEnabled(root.rowMenuId, !plugin.enabled)
-            root.closeRowMenu()
+          Label {
+            text: plugin ? plugin.name : ""
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+            Layout.fillWidth: true
+            elide: Label.ElideRight
+            Layout.margins: Style.space(6)
           }
-        }
 
-        Button {
-          visible: plugin && plugin.sourceKey !== "" && root.pluginRepos[plugin.sourceKey] !== undefined
-          text: "Source"
-          foreground: root.contentForeground
-          accent: Color.accent
-          fontFamily: root.contentFontFamily
-          fontSize: Style.font.bodySmall
-          horizontalPadding: Style.space(8)
-          verticalPadding: Style.space(5)
-          Layout.fillWidth: true
-          Layout.alignment: Qt.AlignLeft
-          onClicked: {
-            root.openPluginRepo(plugin.sourceKey)
-            root.closeRowMenu()
+          Button {
+            text: plugin && plugin.enabled ? "Disable" : "Enable"
+            foreground: root.contentForeground
+            accent: Color.accent
+            fontFamily: root.contentFontFamily
+            fontSize: Style.font.bodySmall
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(5)
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignLeft
+            onClicked: {
+              root.setPluginEnabled(root.rowMenuId, !plugin.enabled)
+              root.closeRowMenu()
+            }
           }
-        }
 
-        Button {
-          visible: plugin && !plugin.firstParty
-          text: "Remove"
-          foreground: Color.urgent
-          accent: Color.urgent
-          fontFamily: root.contentFontFamily
-          fontSize: Style.font.bodySmall
-          horizontalPadding: Style.space(8)
-          verticalPadding: Style.space(5)
-          Layout.fillWidth: true
-          Layout.alignment: Qt.AlignLeft
-          onClicked: {
-            var id = root.rowMenuId
-            root.closeRowMenu()
-            root.removePlugin(id)
+          Button {
+            visible: plugin && plugin.sourceKey !== "" && root.pluginRepos[plugin.sourceKey] !== undefined
+            text: "Source"
+            foreground: root.contentForeground
+            accent: Color.accent
+            fontFamily: root.contentFontFamily
+            fontSize: Style.font.bodySmall
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(5)
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignLeft
+            onClicked: {
+              root.openPluginRepo(plugin.sourceKey)
+              root.closeRowMenu()
+            }
+          }
+
+          Button {
+            visible: plugin && !plugin.firstParty
+            text: "Remove"
+            foreground: Color.urgent
+            accent: Color.urgent
+            fontFamily: root.contentFontFamily
+            fontSize: Style.font.bodySmall
+            horizontalPadding: Style.space(8)
+            verticalPadding: Style.space(5)
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignLeft
+            onClicked: {
+              var id = root.rowMenuId
+              root.closeRowMenu()
+              root.removePlugin(id)
+            }
           }
         }
       }
