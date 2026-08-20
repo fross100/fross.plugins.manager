@@ -1403,7 +1403,6 @@ Panel {
 
           Button {
             text: "Back"
-            enabled: !root.checkingUpdates && root.updatingId === "" && !root.updatingAll
             foreground: root.contentForeground
             accent: Color.accent
             fontFamily: root.contentFontFamily
