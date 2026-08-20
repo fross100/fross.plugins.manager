@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "id": "fross.plugins.manager",
+  "id": "omaplug",
   "name": "Plugin Manager",
   "version": "1.0.0",
   "author": "Fross",

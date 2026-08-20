@@ -1,5 +1,5 @@
 #!/bin/bash
-# Detached install helper for fross.plugins.manager.
+# Detached install helper for omaplug.
 #
 # Runs `omarchy plugin add` and then, when requested, `omarchy plugin enable`.
 # It is launched with setsid/nohup so it survives the plugin reload that

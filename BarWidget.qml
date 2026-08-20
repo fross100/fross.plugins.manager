@@ -6,7 +6,7 @@ import qs.Ui
 
 BarWidget {
     id: root
-    moduleName: "fross.plugins.manager"
+    moduleName: "omaplug"
 
     // The bar's findPanelWidget (Bar.qml) requires open/close/opened on the
     // bar-widget root, and the popout coordinator compares against
@@ -53,7 +53,7 @@ BarWidget {
     }
 
     IpcHandler {
-        target: "fross.plugins.manager"
+        target: "omaplug"
 
         function refresh(): void { root.broadcast("refresh") }
         function open(): void { root.open() }

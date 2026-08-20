@@ -1,4 +1,4 @@
-# Plugin Manager
+# Omaplug
 
 A standalone Omarchy plugin that manages installed Omarchy plugins from a popup panel: enable/disable, check for and apply updates, install new plugins from a git repo, and remove third-party plugins.
 
@@ -12,22 +12,22 @@ Built as a standard bar-widget popup (`KeyboardPanel`), so it works on a stock O
 - **Install**: Add a plugin from a git repo URL (`omarchy plugin add`). Warns that plugins run as arbitrary, unsandboxed code before install.
 - **Remove**: Lists only third-party plugins. Per-row trash button for a single remove, or a Select mode to check several and remove them in one go — always behind a confirmation dialog.
 - **Source link**: Every git-managed plugin gets a `SOURCE` button that opens its remote repo URL.
-- **Search & filter**: Filter by omarchy / third-party / Adna, or search by name, description, id, author, or kind.
+- **Search & filter**: Filter by Omarchy / third-party, or search by name, description, id, author, or kind.
 
 ## Installation
 
 ```bash
-omarchy plugin add https://github.com/fross100/fross.plugins.manager --yes
-omarchy plugin enable fross.plugins.manager
+omarchy plugin add https://github.com/fross100/omaplug --yes
+omarchy plugin enable omaplug
 ```
 
 Or clone into your plugins directory:
 
 ```bash
-git clone https://github.com/fross100/fross.plugins.manager ~/.config/omarchy/plugins/fross.plugins.manager
+git clone https://github.com/fross100/omaplug ~/.config/omarchy/plugins/omaplug
 ```
 
-Then enable it in the plugin manager (or `omarchy plugin enable fross.plugins.manager`) and restart the shell.
+Then enable it in the plugin manager (or `omarchy plugin enable omaplug`) and restart the shell.
 
 ## Usage
 

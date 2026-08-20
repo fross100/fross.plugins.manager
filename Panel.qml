@@ -15,8 +15,8 @@ import qs.Ui
 // path `omarchy plugin enable/disable` uses.
 Panel {
   id: root
-  moduleName: "fross.plugins.manager"
-  ipcTarget: "fross.plugins.manager"
+  moduleName: "omaplug"
+  ipcTarget: "omaplug"
   manageIpc: false
 
   property var anchorItem: null
@@ -167,7 +167,7 @@ Panel {
     var live = root.liveGlyphFor(id)
     if (live) return live
     var map = {
-      "fross.plugins.manager": "\udb85\udcd9",
+      "omaplug":            "\udb85\udcd9",
       "adna.bar":            "\uf2f2",
       "adna.bar-switch":     "\uf2f2",
       "adna.clock":          "\uf64f",
@@ -203,6 +203,7 @@ Panel {
   }
 
   readonly property var visibleRows: root.pluginRows.filter(function(p) {
+    if (root.removeSelectMode && p.firstParty) return false
     if (root.filterMode === 1 && !p.firstParty) return false
     if (root.filterMode === 2 && p.firstParty) return false
     if (root.filterMode === 4 && String(p.id).indexOf("adna.") !== 0) return false
@@ -861,7 +862,7 @@ Panel {
             Layout.preferredHeight: Style.space(44)
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
-            text: root.iconFor("fross.plugins.manager") || "\udb85\udcd9"
+            text: root.iconFor("omaplug") || "\udb85\udcd9"
             color: Style.selectedStateColor(root.contentForeground, Color.accent)
             font.family: root.contentFontFamily
             font.pixelSize: Style.space(34)
@@ -873,13 +874,33 @@ Panel {
             Layout.alignment: Qt.AlignVCenter
             spacing: Style.space(2)
 
-            Label {
-              text: "OMAPLUG"
-              color: root.contentForeground
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.title * 1.6
-              font.bold: true
+            RowLayout {
               Layout.fillWidth: true
+              spacing: Style.space(8)
+
+              Label {
+                text: "OMAPLUG"
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.title * 1.6
+                font.bold: true
+                Layout.fillWidth: true
+              }
+
+              Button {
+                id: marketplaceButton
+                text: "\uf1d8  Marketplace"
+                tooltipText: "Open the Omarchy plugin marketplace"
+                bordered: true
+                foreground: root.contentForeground
+                accent: Color.accent
+                fontFamily: root.contentFontFamily
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(8)
+                verticalPadding: Style.space(3)
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: Qt.openUrlExternally("https://omarchyplugins.com")
+              }
             }
 
             Label {
@@ -996,9 +1017,8 @@ Panel {
             value: String(root.filterMode)
             options: [
               { value: "0", label: "All plugins" },
-              { value: "1", label: "omarchy" },
-              { value: "2", label: "Third-party" },
-              { value: "4", label: "Adna" }
+              { value: "1", label: "Omarchy" },
+              { value: "2", label: "Third-party" }
             ]
             foreground: root.contentForeground
             background: root.panelBackground
@@ -1056,6 +1076,21 @@ Panel {
               anchors.rightMargin: Style.space(10)
               anchors.bottomMargin: Style.space(16)
               spacing: Style.space(10)
+
+              Button {
+                visible: root.removeSelectMode
+                text: root.removeSelection[modelData.id] === true ? "\uf14a" : "\uf0c8"
+                tooltipText: "Select " + modelData.name
+                enabled: !root.removingPlugin
+                Layout.alignment: Qt.AlignVCenter
+                foreground: root.contentForeground
+                accent: Color.accent
+                fontFamily: root.contentFontFamily
+                fontSize: Style.font.bodySmall
+                horizontalPadding: Style.space(6)
+                verticalPadding: Style.space(3)
+                onClicked: root.toggleRemoveSelection(modelData.id)
+              }
 
               Rectangle {
                 id: pluginIcon
@@ -1148,20 +1183,6 @@ Panel {
                   spacing: Style.space(6)
 
                   Button {
-                    visible: root.removeSelectMode
-                    text: root.removeSelection[modelData.id] === true ? "\uf14a" : "\uf0c8"
-                    tooltipText: "Select " + modelData.name
-                    enabled: !root.removingPlugin
-                    foreground: root.contentForeground
-                    accent: Color.accent
-                    fontFamily: root.contentFontFamily
-                    fontSize: Style.font.bodySmall
-                    horizontalPadding: Style.space(6)
-                    verticalPadding: Style.space(3)
-                    onClicked: root.toggleRemoveSelection(modelData.id)
-                  }
-
-                  Button {
                     visible: modelData.updatable
                       && root.pluginRepos[modelData.sourceKey] !== undefined
                     tooltipText: root.pluginRepos[modelData.sourceKey] !== undefined
@@ -1203,7 +1224,7 @@ Panel {
                     verticalPadding: Style.space(3)
                     onClicked: {
                       var btn = rowMenuButton
-                      var pt = btn.mapToItem(root, 0, btn.height)
+                      var pt = btn.mapToItem(rowMenuOverlay, 0, btn.height)
                       root.openRowMenu(modelData.id, pt.x, pt.y)
                     }
                   }
@@ -1239,7 +1260,7 @@ Panel {
               id: rowContextTap
               acceptedButtons: Qt.RightButton
               onTapped: function(event) {
-                var pt = rowContextTap.mapToItem(root.contentItem ? root.contentItem : root, event.point.position.x, event.point.position.y)
+                var pt = rowContextTap.mapToItem(rowMenuOverlay, event.point.position.x, event.point.position.y)
                 root.openRowMenu(modelData.id, pt.x, pt.y)
               }
             }
@@ -1575,6 +1596,7 @@ Panel {
       visible: root.rowMenuOpen
       anchors.fill: parent
       z: 12000
+      color: "transparent"
       focus: true
       Keys.priority: Keys.BeforeItem
       Keys.onEscapePressed: root.closeRowMenu()
@@ -1603,17 +1625,6 @@ Panel {
           implicitWidth: Style.space(180)
 
           property var plugin: root.rowMenuPlugin()
-
-          Label {
-            text: rowMenuColumn.plugin ? rowMenuColumn.plugin.name : ""
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-            font.bold: true
-            Layout.fillWidth: true
-            elide: Label.ElideRight
-            Layout.margins: Style.space(6)
-          }
 
           Button {
             text: rowMenuColumn.plugin && rowMenuColumn.plugin.enabled ? "Disable" : "Enable"
