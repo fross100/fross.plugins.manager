@@ -177,14 +177,14 @@ Panel {
   function iconFor(id) {
     // The clock widget's live button text is the current time, which reads
     // like noise as a row icon — always show the clock glyph for it instead.
-    if (/clock/i.test(String(id))) return "\uf64f"
+    if (/clock/i.test(String(id))) return "\uf017"
     var live = root.liveGlyphFor(id)
     if (live) return live
     var map = {
       "omaplug":            "\udb85\udcd9",
       "adna.bar":            "\uf2f2",
       "adna.bar-switch":     "\uf2f2",
-      "adna.clock":          "\uf64f",
+      "adna.clock":          "\uf017",
       "adna.dynamic.island": "\uf5bb",
       "adna.menu":           "\ue900",
       "adna.notifications":  "\uf0f3",
