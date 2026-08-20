@@ -1,24 +1,40 @@
-# Omaplug
+# 🧩 Omaplug
 
-A standalone Omarchy plugin that manages installed Omarchy plugins from a popup panel: enable/disable, check for and apply updates, install new plugins from a git repo, and remove third-party plugins.
+**Your plugin HQ, right on the bar.**
 
-## Features
+Omaplug is a little popup panel that lives in your Omarchy bar and puts every installed plugin in one tidy place. Toggle things on and off, check for and apply updates, install new plugins from a git link, or clean out third-party plugins you no longer use — all without touching a terminal.
 
-- **Enable / Disable**: Every discovered plugin (first-party Omarchy and third-party) with a toggle. Toggling routes through the shell's `PluginRegistry`, the same path `omarchy plugin enable/disable` uses.
-- **Check for updates**: Scans every git-managed plugin folder, fetches each remote, and reports `Up to date` / `Update available` / `Error` per plugin, streamed live.
-- **Update / Update all**: Apply a single update or update every plugin with a pending update in one go.
-- **Install**: Add a plugin from a git repo URL (`omarchy plugin add`). Warns that plugins run as arbitrary, unsandboxed code before install.
-- **Remove**: Lists only third-party plugins. Per-row trash button for a single remove, or a Select mode to check several and remove them in one go — always behind a confirmation dialog.
-- **Source link**: Every git-managed plugin gets a `SOURCE` button that opens its remote repo URL.
-- **Search & filter**: Filter by Omarchy / third-party, or search by name, description, id, author, or kind.
+## Screenshots
 
-## Installation
+<p align="center">
+  <img src="preview_main.png" alt="Main plugin list" width="420"/>
+  <img src="preview_check-update.png" alt="Checking for updates" width="420"/>
+</p>
+
+<p align="center">
+  <img src="preview_install.png" alt="Installing a plugin" width="420"/>
+  <img src="preview_filter.png" alt="Filtering and searching" width="420"/>
+  <img src="preview_action.png" alt="Row action menu" width="420"/>
+</p>
+
+## What it can do
+
+- **🔌 Enable / disable** — every discovered plugin (Omarchy's own and third-party) gets a simple toggle. Flipping it goes through the same registry the `omarchy plugin enable/disable` command uses, so what you see here is always what's really running.
+- **🔄 Check for updates** — scans every git-managed plugin, peeks at its remote, and tells you per plugin if it's *Up to date*, an *Update is available*, or something went *wrong* — streamed live as it checks.
+- **⬆️ Update (or update everything)** — apply one update, or blast through every plugin with a pending update in a single click.
+- **➕ Install** — paste a git repo URL and add a plugin in one step. It'll warn you first that plugins run as unsandboxed code, because honesty is the default here.
+- **🗑️ Remove** — third-party plugins only. Trash one, or enter Select mode to check several and remove them all at once (with a confirmation, no accidents).
+- **🔗 Source link** — every git-managed plugin gets a `SOURCE` button that jumps straight to its repo page.
+- **🔍 Search & filter** — narrow the list to Omarchy plugins, third-party plugins, or search by name, description, ID, author, or kind.
+- **♻️ Restart shell** — if a plugin ever acts up from stale compiled code, one button clears the QML cache and restarts the shell so everything reloads fresh.
+
+## Install
 
 ```bash
 omarchy plugin add https://github.com/fross100/omaplug --enable
 ```
 
-## Removal
+## Remove
 
 ```bash
 omarchy plugin remove omaplug
@@ -28,4 +44,4 @@ omarchy plugin remove omaplug
 
 - Omarchy 4.x
 - Quickshell
-- `git`, `omarchy` CLI, and a terminal emulator (`wl-copy`/`yad` are not required)
+- `git` and the `omarchy` CLI — a terminal emulator is handy too (`wl-copy` and `yad` are *not* required)
