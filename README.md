@@ -57,3 +57,7 @@ omarchy plugin remove omaplug
 - Omarchy 4.x
 - Quickshell
 - `git` and the `omarchy` CLI — a terminal emulator is handy too (`wl-copy` and `yad` are *not* required)
+
+## License
+
+[MIT](LICENSE) © 2026 Fross
