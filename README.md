@@ -15,7 +15,7 @@ Access it right from the Omarchy bar — it gives you a centralized place to vie
   <tr>
     <td align="center"><img src="preview_main.png" alt="Main plugin list" width="280"/></td>
     <td align="center"><img src="preview_check-update.png" alt="Checking for updates" width="280"/></td>
-    <td align="center"><img src="preview_install.png" alt="Installing a plugin" width="280"/></td>
+    <td align="center"><img src="preview_add.png" alt="Installing a plugin" width="280"/></td>
   </tr>
   <tr>
     <td align="center">Plugin list</td>
