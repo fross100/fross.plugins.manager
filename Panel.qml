@@ -1144,7 +1144,7 @@ Panel {
               Button {
                 visible: root.removeSelectMode
                 text: root.removeSelection[modelData.id] === true ? "\uf14a" : "\uf0c8"
-                tooltipText: "Select " + modelData.name
+                tooltipText: "Select plugin for removal"
                 enabled: !root.removingPlugin
                 Layout.alignment: Qt.AlignVCenter
                 foreground: root.contentForeground
