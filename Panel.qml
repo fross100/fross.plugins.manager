@@ -672,6 +672,39 @@ Panel {
   // Launch the detached helper. `omarchy plugin add` reloads plugins when it
   // finishes, which unloads this panel; the helper is started with
   // setsid/nohup so it survives and finishes the enable itself.
+  // The status file is created securely via mktemp to avoid predictable /tmp
+  // symlink races (the helper truncates it, so creation must be exclusive).
+  property string _installPendingUrl: ""
+  property string _installPendingEnableFlag: "0"
+  property Process installStatusMktmpProcess: Process {
+    stdout: StdioCollector {
+      id: installMktmpStdout
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) {
+        root.installDetachedRunning = false
+        root.installFailed = true
+        root.installResult = "Could not create secure status file"
+        return
+      }
+      var p = String(installMktmpStdout.text || "").trim()
+      if (p === "" || p.indexOf("/") !== 0) {
+        root.installDetachedRunning = false
+        root.installFailed = true
+        root.installResult = "Could not create secure status file"
+        return
+      }
+      root.installStatusPath = p
+      installStatusFile.path = p
+      var launch = ["bash", "-c",
+        "setsid nohup \"$0\" \"$1\" \"$2\" \"$3\" >/dev/null 2>&1 &",
+        root.installHelperPath, root._installPendingUrl, p, root._installPendingEnableFlag]
+      installLaunchProcess.command = launch
+      installLaunchProcess.running = true
+    }
+  }
+
   function startDetachedInstall(url) {
     var helper = root.installHelperPath
     if (helper === "") {
@@ -679,17 +712,12 @@ Panel {
       root.installResult = "Install helper not found"
       return
     }
-    root.installStatusPath = "/tmp/fross-install-" + Date.now() + ".status"
+    root._installPendingUrl = url
+    root._installPendingEnableFlag = root.installShouldEnable ? "1" : "0"
     root.installDetachedRunning = true
     root.installResult = "Installing " + url + "…"
-    var enableFlag = root.installShouldEnable ? "1" : "0"
-    var launch = ["bash", "-c",
-      "setsid nohup \"$0\" \"$1\" \"$2\" \"$3\" >/dev/null 2>&1 &",
-      helper, url, root.installStatusPath, enableFlag]
-    // Use a short-lived Process to fire the helper; it exits immediately.
-    installLaunchProcess.command = launch
-    installLaunchProcess.running = true
-    installStatusFile.path = root.installStatusPath
+    installStatusMktmpProcess.command = ["bash", "-c", 'umask 077; mktemp "${XDG_RUNTIME_DIR:-/tmp}/omaplug-install-XXXXXX.status" 2>/dev/null || mktemp /tmp/omaplug-install-XXXXXX.status']
+    installStatusMktmpProcess.running = true
   }
 
   function cancelInstallConfirm() {
@@ -1151,6 +1179,7 @@ Panel {
                 Text {
                   anchors.centerIn: parent
                   text: root.iconFor(modelData.id) || modelData.name.trim().charAt(0).toUpperCase()
+                  textFormat: Text.PlainText
                   color: "white"
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.bodySmall
@@ -1169,6 +1198,7 @@ Panel {
 
                   Label {
                     text: modelData.name
+                    textFormat: Text.PlainText
                     color: root.contentForeground
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.body
@@ -1180,6 +1210,7 @@ Panel {
 
                 Label {
                   text: modelData.description !== "" ? modelData.description : "No description"
+                  textFormat: Text.PlainText
                   color: Qt.darker(root.contentForeground, 1.6)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.bodySmall
@@ -1196,6 +1227,7 @@ Panel {
                   Label {
                     visible: modelData.version !== "unknown"
                     text: "v" + modelData.version
+                    textFormat: Text.PlainText
                     color: Qt.darker(root.contentForeground, 2.0)
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.caption
@@ -1204,6 +1236,7 @@ Panel {
                   Label {
                     visible: modelData.author !== ""
                     text: "by " + modelData.author
+                    textFormat: Text.PlainText
                     color: modelData.firstParty
                       ? Style.selectedStateColor(root.contentForeground, Color.accent)
                       : Qt.darker(root.contentForeground, 2.0)
@@ -1214,6 +1247,7 @@ Panel {
                   Label {
                     visible: modelData.kinds !== ""
                     text: "· " + modelData.kinds
+                    textFormat: Text.PlainText
                     color: Qt.darker(root.contentForeground, 2.0)
                     font.family: root.contentFontFamily
                     font.pixelSize: Style.font.caption
@@ -1486,6 +1520,7 @@ Panel {
                 Text {
                   anchors.centerIn: parent
                   text: root.iconFor(modelData.id) || modelData.name.trim().charAt(0).toUpperCase()
+                  textFormat: Text.PlainText
                   color: "white"
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.bodySmall
@@ -1500,6 +1535,7 @@ Panel {
 
                 Label {
                   text: modelData.name
+                  textFormat: Text.PlainText
                   color: root.contentForeground
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.body
@@ -1510,6 +1546,7 @@ Panel {
 
                 Label {
                   text: root.updateStatusText(modelData.sourceKey)
+                  textFormat: Text.PlainText
                   color: root.updateStatusColor(modelData.sourceKey)
                   font.family: root.contentFontFamily
                   font.pixelSize: Style.font.caption
