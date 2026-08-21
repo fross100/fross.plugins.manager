@@ -67,18 +67,10 @@ Panel {
   // freshly installed plugin. installPendingUrl carries the extracted URL.
   property bool installConfirmOpen: false
   property string installPendingUrl: ""
-  property bool installPendingEnable: false
-  // After a successful install, enable the plugin by running the CLI enable
-  // command once the shell has had time to discover the new plugin. The CLI's
-  // own `--enable` during add races with the reload, so enable runs as a
-  // separate step afterwards.
-  property bool installShouldEnable: false
-  property string installPendingId: ""
-  property int installEnableAttempts: 0
-  // Paths for the detached install helper. The helper is launched with
-  // setsid/nohup because `omarchy plugin add` reloads plugins at the end,
-  // which unloads this panel and would kill an ordinary Process mid-run.
-  property string installHelperPath: ""
+  // Status file for the detached installer. The file is created securely
+  // via mktemp (XDG_RUNTIME_DIR) so the helper can truncate it without
+  // following an attacker-controlled symlink. The plugin is installed but
+  // not enabled by default — user must enable manually after reviewing.
   property string installStatusPath: ""
   property bool installDetachedRunning: false
 
@@ -645,23 +637,19 @@ Panel {
     return /\s--enable\b/.test(" " + String(text || "").trim())
   }
 
-  // Called from the install dialog: extract the URL, then ask whether to
-  // enable the plugin after install. A `--enable` in a pasted command
-  // pre-chooses the enable option.
+  // Called from the install dialog: extract the URL and ask for
+  // confirmation. The plugin is installed but NOT enabled by default
+  // (user must enable manually after reviewing the code).
   function requestInstall() {
     var url = root.extractInstallUrl(installUrlField.text)
     if (url === "") return
     root.installPendingUrl = url
-    root.installPendingEnable = root.installCommandHasEnable(installUrlField.text)
     root.installConfirmOpen = true
   }
 
   function installPlugin() {
     var url = root.installPendingUrl
     if (url === "") return
-    root.installShouldEnable = root.installPendingEnable
-    root.installPendingId = ""
-    root.installEnableAttempts = 0
     root.installConfirmOpen = false
     root.installRunning = true
     root.installFailed = false
@@ -675,7 +663,6 @@ Panel {
   // The status file is created securely via mktemp to avoid predictable /tmp
   // symlink races (the helper truncates it, so creation must be exclusive).
   property string _installPendingUrl: ""
-  property string _installPendingEnableFlag: "0"
   property Process installStatusMktmpProcess: Process {
     stdout: StdioCollector {
       id: installMktmpStdout
@@ -697,23 +684,29 @@ Panel {
       }
       root.installStatusPath = p
       installStatusFile.path = p
+      // Directly run omarchy plugin add in a detached shell; no helper script.
+      // The plugin is installed but not enabled (user enables manually).
       var launch = ["bash", "-c",
-        "setsid nohup \"$0\" \"$1\" \"$2\" \"$3\" >/dev/null 2>&1 &",
-        root.installHelperPath, root._installPendingUrl, p, root._installPendingEnableFlag]
+        "setsid nohup bash -c '"
+        + "STATUS=\"$2\"; URL=\"$1\"; "
+        + "if [ -L \"$STATUS\" ]; then echo \"Refusing symlink\" >&2; exit 1; fi; "
+        + "umask 077; chmod 600 \"$STATUS\" 2>/dev/null || true; "
+        + "printf \"installing\\n\" >> \"$STATUS\"; "
+        + "out=$(omarchy plugin add \"$URL\" --yes 2>&1); rc=$?; "
+        + "printf \"%s\\n\" \"$out\" >> \"$STATUS\"; "
+        + "if [ $rc -ne 0 ]; then printf \"install_failed\\n\" >> \"$STATUS\"; exit 1; fi; "
+        + "id=$(printf \"%s\\n\" \"$out\" | sed -n \"s/.*Added \\([^ ]*\\) into.*/\\1/p\"); "
+        + "if [ -n \"$id\" ]; then printf \"id=%s\\n\" \"$id\" >> \"$STATUS\"; fi; "
+        + "printf \"done\\n\" >> \"$STATUS\"; "
+        + "' -- \"$0\" \"$1\" >/dev/null 2>&1 &",
+        root._installPendingUrl, p]
       installLaunchProcess.command = launch
       installLaunchProcess.running = true
     }
   }
 
   function startDetachedInstall(url) {
-    var helper = root.installHelperPath
-    if (helper === "") {
-      root.installFailed = true
-      root.installResult = "Install helper not found"
-      return
-    }
     root._installPendingUrl = url
-    root._installPendingEnableFlag = root.installShouldEnable ? "1" : "0"
     root.installDetachedRunning = true
     root.installResult = "Installing " + url + "…"
     installStatusMktmpProcess.command = ["bash", "-c", 'umask 077; mktemp "${XDG_RUNTIME_DIR:-/tmp}/omaplug-install-XXXXXX.status" 2>/dev/null || mktemp /tmp/omaplug-install-XXXXXX.status']
@@ -770,11 +763,6 @@ Panel {
       if (failed) {
         root.installFailed = true
         root.installResult = "Install failed"
-      } else if (root.installShouldEnable && !enabled) {
-        root.installFailed = true
-        root.installResult = "Installed, but enabling failed"
-      } else if (root.installShouldEnable) {
-        root.installResult = "Installed and enabled."
       } else {
         root.installResult = "Installed. Review the code, then enable it in the list."
       }
@@ -836,7 +824,6 @@ Panel {
 
   Component.onCompleted: {
     console.log("Panel.qml loaded, filterMode=", root.filterMode, "rows=", root.pluginRows.length)
-    root.installHelperPath = String(Qt.resolvedUrl("install-helper.sh")).replace(/^file:\/\//, "")
     refreshPlugins()
   }
 
@@ -1994,7 +1981,7 @@ Panel {
           }
 
           Text {
-            text: "Plugins run as arbitrary, unsandboxed code inside your omarchy-shell process. Only add repos you trust — review the code before you enable the plugin."
+            text: "Plugins run as arbitrary, unsandboxed code inside your omarchy-shell process. Only add repos you trust — review the code before you enable the plugin. The plugin will be installed but NOT enabled; enable it manually from the list after reviewing."
             color: Qt.darker(root.contentForeground, 1.6)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -2004,7 +1991,7 @@ Panel {
 
           TextField {
             id: installUrlField
-            placeholderText: "https://github.com/acme/omarchy-weather.git or omarchy plugin add <url> --enable"
+            placeholderText: "https://github.com/acme/omarchy-weather.git"
             foreground: root.contentForeground
             accent: Color.accent
             font.family: root.contentFontFamily
@@ -2105,7 +2092,7 @@ Panel {
           }
 
           Text {
-            text: "\"" + root.installPendingUrl + "\" will be added via `omarchy plugin add`. Do you want to enable it right after installing?"
+            text: "\"" + root.installPendingUrl + "\" will be added via `omarchy plugin add` but will remain DISABLED until you enable it manually. Review the code after install, then enable from the plugin list."
             color: Qt.darker(root.contentForeground, 1.6)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -2137,25 +2124,7 @@ Panel {
               fontSize: Style.font.bodySmall
               horizontalPadding: Style.space(12)
               verticalPadding: Style.space(6)
-              onClicked: {
-                root.installPendingEnable = false
-                root.installPlugin()
-              }
-            }
-
-            Button {
-              text: "Install & Enable"
-              bordered: true
-              foreground: root.contentForeground
-              accent: Color.accent
-              fontFamily: root.contentFontFamily
-              fontSize: Style.font.bodySmall
-              horizontalPadding: Style.space(12)
-              verticalPadding: Style.space(6)
-              onClicked: {
-                root.installPendingEnable = true
-                root.installPlugin()
-              }
+              onClicked: root.installPlugin()
             }
           }
         }
