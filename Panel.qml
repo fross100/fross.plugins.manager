@@ -738,8 +738,9 @@ Panel {
         + "if [ -L \"$STATUS\" ]; then echo \"Refusing symlink\" >&2; exit 1; fi; "
         + "umask 077; chmod 600 \"$STATUS\" 2>/dev/null || true; "
         + "printf \"installing\\n\" >> \"$STATUS\"; "
-        + "out=$(omarchy plugin add \"$URL\" --yes 2>&1); rc=$?; "
-        + "printf \"%s\\n\" \"$out\" >> \"$STATUS\"; "
+        + "out=$(omarchy plugin add \"$URL\" --yes 2>&1 | head -c 8192); rc=$?; "
+        + "printf \"%.8192s\\n\" \"$out\" >> \"$STATUS\"; "
+        + "head -c 8192 \"$STATUS\" > \"$STATUS.tmp\" 2>/dev/null && mv \"$STATUS.tmp\" \"$STATUS\" 2>/dev/null || true; "
         + "if [ $rc -ne 0 ]; then printf \"install_failed\\n\" >> \"$STATUS\"; exit 1; fi; "
         + "id=$(printf \"%s\\n\" \"$out\" | sed -n \"s/.*Added \\([^ ]*\\) into.*/\\1/p\"); "
         + "if [ -n \"$id\" ]; then printf \"id=%s\\n\" \"$id\" >> \"$STATUS\"; fi; "
@@ -782,7 +783,22 @@ Panel {
     var text = ""
     try { text = installStatusFile.text() } catch (e) { return }
     if (text === "") return
+    // Enforce strict ceiling: remote output can be attacker-controlled.
+    // Truncate to 8192 bytes / 200 lines before allocation in long-lived shell.
+    if (text.length > 8192) {
+      text = text.substring(0, 8192)
+      // Mark as failed if truncated due to excessive output
+      if (text.indexOf("install_failed") === -1 && text.indexOf("done") === -1) {
+        root.installDetachedRunning = false
+        root.installRunning = false
+        root.installFailed = true
+        root.installResult = "Install output too large"
+        root.installStatusPath = ""
+        return
+      }
+    }
     var lines = String(text).split("\n")
+    if (lines.length > 200) lines = lines.slice(0, 200)
     var id = ""
     var done = false
     var failed = false
