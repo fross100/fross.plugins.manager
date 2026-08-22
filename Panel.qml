@@ -1255,8 +1255,7 @@ Panel {
                   Button {
                     visible: modelData.updatable
                       && root.pluginRepos[modelData.sourceKey] !== undefined
-                    tooltipText: root.pluginRepos[modelData.sourceKey] !== undefined
-                      ? String(root.pluginRepos[modelData.sourceKey]) : ""
+                    tooltipText: "Open plugin repository"
                     text: "SOURCE \udb85\udd94"
                     bordered: true
                     foreground: root.contentForeground
@@ -1354,6 +1353,7 @@ Panel {
           Label {
             visible: root.updateSummary !== ""
             text: root.updateSummary
+            textFormat: Text.PlainText
             color: Style.selectedStateColor(root.contentForeground, Color.accent)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -1362,6 +1362,7 @@ Panel {
           Label {
             visible: root.removeSummary !== ""
             text: root.removeSummary
+            textFormat: Text.PlainText
             color: Style.selectedStateColor(root.contentForeground, Color.accent)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -1639,6 +1640,7 @@ Panel {
           Label {
             visible: root.updateSummary !== ""
             text: root.updateSummary
+            textFormat: Text.PlainText
             color: Style.selectedStateColor(root.contentForeground, Color.accent)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
@@ -2005,6 +2007,7 @@ Panel {
           Text {
             visible: root.installResult !== ""
             text: root.installResult
+            textFormat: Text.PlainText
             color: root.installRunning ? root.contentForeground
               : (root.installFailed ? Color.urgent
                 : Style.selectedStateColor(root.contentForeground, Color.accent))
