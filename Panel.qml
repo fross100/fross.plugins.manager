@@ -376,7 +376,9 @@ Panel {
 
   function openPluginRepo(sourceKey) {
     var url = root.repoUrlFor(sourceKey)
-    if (url) Qt.openUrlExternally(url)
+    // Only hand http(s) URLs to the browser: a malicious plugin's git remote
+    // could otherwise use file://, command:, or custom schemes via xdg-open.
+    if (url && /^https?:\/\//.test(url)) Qt.openUrlExternally(url)
   }
 
   function openRowMenu(id, x, y) {
@@ -738,7 +740,9 @@ Panel {
         + "if [ -L \"$STATUS\" ]; then echo \"Refusing symlink\" >&2; exit 1; fi; "
         + "umask 077; chmod 600 \"$STATUS\" 2>/dev/null || true; "
         + "printf \"installing\\n\" >> \"$STATUS\"; "
-        + "out=$(omarchy plugin add \"$URL\" --yes 2>&1 | head -c 8192); rc=$?; "
+        + "TMP_OUT=$(mktemp); "
+        + "omarchy plugin add \"$URL\" --yes >\"$TMP_OUT\" 2>&1; rc=$?; "
+        + "out=$(head -c 8192 \"$TMP_OUT\"); rm -f \"$TMP_OUT\"; "
         + "printf \"%.8192s\\n\" \"$out\" >> \"$STATUS\"; "
         + "head -c 8192 \"$STATUS\" > \"$STATUS.tmp\" 2>/dev/null && mv \"$STATUS.tmp\" \"$STATUS\" 2>/dev/null || true; "
         + "if [ $rc -ne 0 ]; then printf \"install_failed\\n\" >> \"$STATUS\"; exit 1; fi; "
