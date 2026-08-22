@@ -1815,6 +1815,7 @@ Panel {
             text: root.removePending.length > 1
               ? "The selected plugins will be deleted from your config. This cannot be undone."
               : "\"" + (root.removePending.length === 1 ? root.removePending[0] : "") + "\" will be deleted from your config. This cannot be undone."
+            textFormat: Text.PlainText
             color: Qt.darker(root.contentForeground, 1.6)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
