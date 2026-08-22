@@ -618,9 +618,10 @@ Panel {
   function extractInstallUrl(text) {
     var t = String(text || "").trim()
     if (t === "") return ""
-    // Bare URL (possibly with .git): return it as-is.
-    if (t.indexOf("://") !== -1 && t.indexOf(" ") === -1) return t
-    if (t.indexOf("git@") === 0 && t.indexOf(" ") === -1) return t
+    // Bare URL (possibly with .git): return it as-is. Reject any whitespace
+    // (space, tab, newline) to avoid crafted markup slipping through.
+    if (t.indexOf("://") !== -1 && !/\s/.test(t)) return t
+    if (t.indexOf("git@") === 0 && !/\s/.test(t)) return t
     // Full command: pick the first token that looks like a URL.
     var tokens = t.split(/\s+/)
     for (var i = 0; i < tokens.length; i++) {
@@ -2097,6 +2098,7 @@ Panel {
 
           Text {
             text: "\"" + root.installPendingUrl + "\" will be added via `omarchy plugin add` but will remain DISABLED until you enable it manually. Review the code after install, then enable from the plugin list."
+            textFormat: Text.PlainText
             color: Qt.darker(root.contentForeground, 1.6)
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
