@@ -613,21 +613,56 @@ Panel {
     }
   }
 
-  // Accepts either a bare git URL or a full `omarchy plugin add <url>`
-  // command. Returns the URL token, or "" if none can be found.
+  // Only accepts GitHub repository URLs (https or git@). Mirrors the
+  // marketplace's github-repository validation and how omarchy plugin/theme
+  // installs are expected to use github links (omarchy plugin add
+  // https://github.com/owner/repo.git). Rejects non-GitHub hosts and any
+  // whitespace (space, tab, newline) to avoid crafted markup.
+  function isValidGitHubRepoUrl(url) {
+    if (!url || typeof url !== "string") return false
+    if (/\s/.test(url)) return false
+    var u = url.replace(/[.,;!?]+$/, "")
+    var httpsPat = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/
+    if (httpsPat.test(u)) {
+      var m = u.match(/^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\.git)?\/?$/)
+      if (m) {
+        var owner = m[1], repo = m[2].replace(/\.git$/, "")
+        if (owner.indexOf("..") !== -1 || repo.indexOf("..") !== -1) return false
+        if (!/^[A-Za-z0-9]/.test(owner) || !/^[A-Za-z0-9]/.test(repo)) return false
+      }
+      return true
+    }
+    var sshPat = /^git@github\.com:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/
+    if (sshPat.test(u)) {
+      var n = u.match(/^git@github\.com:([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)(?:\.git)?\/?$/)
+      if (n) {
+        var o = n[1], r = n[2].replace(/\.git$/, "")
+        if (o.indexOf("..") !== -1 || r.indexOf("..") !== -1) return false
+        if (!/^[A-Za-z0-9]/.test(o) || !/^[A-Za-z0-9]/.test(r)) return false
+      }
+      return true
+    }
+    var sshUrlPat = /^ssh:\/\/git@github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?\/?$/
+    if (sshUrlPat.test(u)) return true
+    return false
+  }
+
+  // Accepts either a bare GitHub URL or a full `omarchy plugin add <url>`
+  // command. Returns the validated GitHub URL, or "" if none found or not GitHub.
   function extractInstallUrl(text) {
     var t = String(text || "").trim()
     if (t === "") return ""
-    // Bare URL (possibly with .git): return it as-is. Reject any whitespace
-    // (space, tab, newline) to avoid crafted markup slipping through.
-    if (t.indexOf("://") !== -1 && !/\s/.test(t)) return t
-    if (t.indexOf("git@") === 0 && !/\s/.test(t)) return t
-    // Full command: pick the first token that looks like a URL.
+    function isValid(tok) {
+      tok = tok.replace(/[.,;!?]+$/, "")
+      return isValidGitHubRepoUrl(tok)
+    }
+    if (!/\s/.test(t)) {
+      return isValid(t) ? t.replace(/[.,;!?]+$/, "") : ""
+    }
     var tokens = t.split(/\s+/)
     for (var i = 0; i < tokens.length; i++) {
-      var tok = tokens[i]
-      if (tok.indexOf("://") !== -1 || tok.indexOf("git@") === 0)
-        return tok
+      var tok = tokens[i].replace(/[.,;!?]+$/, "")
+      if (isValid(tok)) return tok
     }
     return ""
   }
@@ -639,11 +674,21 @@ Panel {
   }
 
   // Called from the install dialog: extract the URL and ask for
-  // confirmation. The plugin is installed but NOT enabled by default
-  // (user must enable manually after reviewing the code).
+  // confirmation. Only GitHub URLs are accepted (https://github.com/owner/repo
+  // or git@github.com:owner/repo.git), matching omarchy plugin/theme
+  // expectations and preventing arbitrary host installs. The plugin is
+  // installed but NOT enabled by default.
   function requestInstall() {
-    var url = root.extractInstallUrl(installUrlField.text)
-    if (url === "") return
+    var raw = String(installUrlField.text || "").trim()
+    if (raw === "") return
+    var url = root.extractInstallUrl(raw)
+    if (url === "") {
+      root.installResult = "Please enter a valid GitHub repository URL (https://github.com/owner/repo or git@github.com:owner/repo.git)"
+      root.installFailed = true
+      return
+    }
+    root.installFailed = false
+    root.installResult = ""
     root.installPendingUrl = url
     root.installConfirmOpen = true
   }
